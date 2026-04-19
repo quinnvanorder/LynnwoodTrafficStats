@@ -18,12 +18,7 @@ RUN pip install --no-cache-dir playwright
 
 # Pre-download model weights into the image so the NAS doesn't need internet at runtime.
 # Ultralytics saves to WORKDIR (/build/) when the model file doesn't exist there.
-RUN PYTHONPATH=/install/lib/python3.12/site-packages python -c "
-from ultralytics import YOLO
-for m in ['yolov8n.pt', 'yolo11n.pt', 'yolo11s.pt']:
-    YOLO(m)
-    print(f'Downloaded {m}')
-"
+RUN PYTHONPATH=/install/lib/python3.12/site-packages python -c "from ultralytics import YOLO; [YOLO(m) for m in ['yolov8n.pt','yolo11n.pt','yolo11s.pt']]"
 
 
 FROM python:3.12-slim
