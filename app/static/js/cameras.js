@@ -1,4 +1,4 @@
-// Camera panel: list + detail view with image playback
+// Camera panel: list + detail view with image playback (LAN) or video scrubbing (static)
 
 const CameraPanel = (() => {
   const STAT_LABELS = {
@@ -12,15 +12,25 @@ const CameraPanel = (() => {
 
   let _stats = [];
   let _selectedId = null;
-  let _timeWindow = '1d';
+  let _timeWindow = '5m';
+  let _isStaticMode = false;
+
+  // LAN playback state
   let _playFrames = [];
   let _playIndex = 0;
   let _playTimer = null;
-  let _onSelect = null;   // called when user picks camera from list → pan map
 
-  // DOM refs (set in init)
+  // Static video state
+  let _videoIndex = [];
+  let _scrubbing = false;
+
+  let _onSelect = null;
+
+  // DOM refs
   let panel, listView, detailView, listEl, searchEl;
-  let detailName, detailImage, detailTimestamp, detailStatsEl;
+  let detailName, detailTimestamp, detailStatsEl, statsHeading;
+  let imageWrap, detailImage;
+  let videoWrap, detailVideo, scrubRow, scrubBar;
   let playBtn, stopBtn, playFill;
 
   function _el(id) { return document.getElementById(id); }
@@ -33,9 +43,15 @@ const CameraPanel = (() => {
     listEl       = _el('cpCameraList');
     searchEl     = _el('cpSearch');
     detailName   = _el('cpDetailName');
+    detailTimestamp  = _el('cpDetailTimestamp');
+    detailStatsEl    = _el('cpDetailStats');
+    statsHeading     = _el('cpStatsHeading');
+    imageWrap    = _el('cpImageWrap');
     detailImage  = _el('cpDetailImage');
-    detailTimestamp = _el('cpDetailTimestamp');
-    detailStatsEl   = _el('cpDetailStats');
+    videoWrap    = _el('cpVideoWrap');
+    detailVideo  = _el('cpDetailVideo');
+    scrubRow     = _el('cpScrubRow');
+    scrubBar     = _el('cpScrubBar');
     playBtn      = _el('cpPlayBtn');
     stopBtn      = _el('cpStopBtn');
     playFill     = _el('cpPlayFill');
@@ -46,10 +62,28 @@ const CameraPanel = (() => {
     playBtn.addEventListener('click', _startPlay);
     stopBtn.addEventListener('click', _stopPlay);
 
+    scrubBar.addEventListener('mousedown', () => { _scrubbing = true; });
+    scrubBar.addEventListener('touchstart', () => { _scrubbing = true; });
+    scrubBar.addEventListener('input', () => {
+      detailVideo.currentTime = Number(scrubBar.value);
+    });
+    scrubBar.addEventListener('mouseup',   () => { _scrubbing = false; });
+    scrubBar.addEventListener('touchend',  () => { _scrubbing = false; });
+
+    detailVideo.addEventListener('timeupdate', _onVideoTimeUpdate);
+    detailVideo.addEventListener('ended', () => {
+      playBtn.style.display = '';
+      stopBtn.style.display = 'none';
+    });
+
     listEl.addEventListener('click', e => {
       const item = e.target.closest('[data-cam-id]');
       if (item) _selectFromList(Number(item.dataset.camId));
     });
+  }
+
+  function setStaticMode(isStatic) {
+    _isStaticMode = isStatic;
   }
 
   function show() { panel.style.display = 'flex'; }
@@ -103,13 +137,26 @@ const CameraPanel = (() => {
     listView.style.display = 'none';
     detailView.style.display = 'flex';
     detailName.textContent = cam.address;
-    detailImage.src = '';
     detailTimestamp.textContent = '';
     playFill.style.width = '0%';
-
     _updateDetailStats(cam);
 
-    // Load latest image
+    if (_isStaticMode) {
+      await _showDetailStatic(cam);
+    } else {
+      await _showDetailLAN(cam);
+    }
+  }
+
+  // ── LAN detail ────────────────────────────────────────────────────────────────
+
+  async function _showDetailLAN(cam) {
+    imageWrap.style.display = '';
+    videoWrap.style.display = 'none';
+    scrubRow.style.display = 'none';
+    statsHeading.textContent = 'Counts · selected window';
+    detailImage.src = '';
+
     const snaps = await fetch(`/api/snapshots?camera_id=${cam.id}&limit=1`).then(r => r.json());
     if (snaps.length && snaps[0].image_path) {
       const snap = snaps[0];
@@ -117,14 +164,7 @@ const CameraPanel = (() => {
       detailTimestamp.textContent = _fmtTs(snap.captured_at);
     }
 
-    // Pre-load playback frames for this window
     _loadFrames(cam.id);
-  }
-
-  function _updateDetailStats(cam) {
-    detailStatsEl.innerHTML = Object.entries(STAT_LABELS)
-      .map(([k, l]) => `<span class="ds-label">${l}</span><span class="ds-val">${(cam[k] || 0).toLocaleString()}</span>`)
-      .join('');
   }
 
   async function _loadFrames(cameraId) {
@@ -135,11 +175,11 @@ const CameraPanel = (() => {
       url += `&start=${encodeURIComponent(start)}`;
     }
     const snaps = await fetch(url).then(r => r.json());
-    _playFrames = snaps.filter(s => s.image_path).reverse(); // chronological
+    _playFrames = snaps.filter(s => s.image_path).reverse();
     _playIndex = _playFrames.length - 1;
   }
 
-  function _startPlay() {
+  function _startPlayLAN() {
     if (_playTimer || !_playFrames.length) return;
     playBtn.style.display = 'none';
     stopBtn.style.display = '';
@@ -150,32 +190,124 @@ const CameraPanel = (() => {
       detailImage.src = '/data/' + (f.annotated_path || f.image_path);
       detailTimestamp.textContent = _fmtTs(f.captured_at);
       playFill.style.width = ((_playIndex / _playFrames.length) * 100) + '%';
+      statsHeading.textContent = 'Counts · this frame';
       _updateDetailStats(f);
     }, 250);
   }
 
-  function _stopPlay() {
+  function _stopPlayLAN() {
     if (_playTimer) { clearInterval(_playTimer); _playTimer = null; }
     playBtn.style.display = '';
     stopBtn.style.display = 'none';
-    // Restore time-window aggregate counts
+    statsHeading.textContent = 'Counts · selected window';
     const cam = _stats.find(c => c.id === _selectedId);
     if (cam) _updateDetailStats(cam);
   }
 
+  // ── Static detail ─────────────────────────────────────────────────────────────
+
+  async function _showDetailStatic(cam) {
+    imageWrap.style.display = 'none';
+    videoWrap.style.display = '';
+    scrubRow.style.display = '';
+    statsHeading.textContent = 'Counts · full period';
+
+    const base = `data/cameras/${cam.id}`;
+    detailVideo.src = `${base}/video.webm`;
+    scrubBar.value = 0;
+    playFill.style.width = '0%';
+
+    detailVideo.onloadedmetadata = () => {
+      scrubBar.max = detailVideo.duration;
+    };
+
+    try {
+      _videoIndex = await fetch(`${base}/index.json`).then(r => r.json());
+      if (_videoIndex.length) {
+        _updateDetailStats(_videoIndex[0]);
+        detailTimestamp.textContent = _fmtTs(_videoIndex[0].ts);
+      }
+    } catch {
+      _videoIndex = [];
+    }
+  }
+
+  function _onVideoTimeUpdate() {
+    if (!_videoIndex.length) return;
+    const frame = _findVideoFrame(detailVideo.currentTime);
+    if (frame) {
+      statsHeading.textContent = 'Counts · this frame';
+      _updateDetailStats(frame);
+      detailTimestamp.textContent = _fmtTs(frame.ts);
+    }
+    const pct = detailVideo.duration
+      ? (detailVideo.currentTime / detailVideo.duration) * 100
+      : 0;
+    playFill.style.width = pct + '%';
+    if (!_scrubbing) scrubBar.value = detailVideo.currentTime;
+  }
+
+  function _findVideoFrame(t) {
+    // Binary search for the last frame with .t <= t
+    let lo = 0, hi = _videoIndex.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (_videoIndex[mid].t <= t) lo = mid;
+      else hi = mid - 1;
+    }
+    return _videoIndex[lo] || null;
+  }
+
+  function _startPlayStatic() {
+    detailVideo.play().catch(() => {});
+    playBtn.style.display = 'none';
+    stopBtn.style.display = '';
+  }
+
+  function _stopPlayStatic() {
+    detailVideo.pause();
+    playBtn.style.display = '';
+    stopBtn.style.display = 'none';
+  }
+
+  // ── Shared play/stop ─────────────────────────────────────────────────────────
+
+  function _startPlay() {
+    if (_isStaticMode) _startPlayStatic();
+    else _startPlayLAN();
+  }
+
+  function _stopPlay() {
+    if (_isStaticMode) _stopPlayStatic();
+    else _stopPlayLAN();
+  }
+
   function _back() {
     _stopPlay();
+    if (_isStaticMode) {
+      detailVideo.pause();
+      detailVideo.src = '';
+    }
     _selectedId = null;
     detailView.style.display = 'none';
     listView.style.display = '';
     _renderList();
   }
 
-  function _fmtTs(ts) {
-    if (!ts) return '';
-    try { return new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
-    catch { return ts; }
+  function _updateDetailStats(obj) {
+    detailStatsEl.innerHTML = Object.entries(STAT_LABELS)
+      .map(([k, l]) => `<span class="ds-label">${l}</span><span class="ds-val">${(obj[k] || 0).toLocaleString()}</span>`)
+      .join('');
   }
 
-  return { init, show, hide, toggle, setTimeWindow, updateStats, selectCamera };
+  function _fmtTs(ts) {
+    if (!ts) return '';
+    try {
+      return new Date(ts).toLocaleString(undefined, {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+      });
+    } catch { return ts; }
+  }
+
+  return { init, show, hide, toggle, setStaticMode, setTimeWindow, updateStats, selectCamera };
 })();

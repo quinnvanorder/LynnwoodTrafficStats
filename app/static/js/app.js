@@ -27,6 +27,7 @@
   CameraPanel.init(cam => {
     MapManager.highlightCamera(cam);
   });
+  Data.isStatic().then(s => CameraPanel.setStaticMode(s));
 
   // ── Map click → open camera panel detail ────────────────────────────────────
   MapManager.onCameraClick(cam => {

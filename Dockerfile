@@ -37,6 +37,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
     netcat-openbsd \
     git \
     openssh-client \
+    ffmpeg \
     libgl1 \
     libglib2.0-0t64 \
     libnss3 \

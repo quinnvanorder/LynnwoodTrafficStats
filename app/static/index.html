@@ -115,8 +115,13 @@
         <button id="cpBackBtn" class="cp-back-btn">← Back</button>
         <h3 id="cpDetailName"></h3>
       </div>
-      <div class="cp-image-wrap">
+      <!-- LAN: still image -->
+      <div class="cp-image-wrap" id="cpImageWrap">
         <img id="cpDetailImage" class="cp-detail-image" alt="" />
+      </div>
+      <!-- Static export: video -->
+      <div class="cp-image-wrap" id="cpVideoWrap" style="display:none">
+        <video id="cpDetailVideo" class="cp-detail-image" playsinline muted></video>
       </div>
       <div id="cpDetailTimestamp" class="cp-detail-ts"></div>
       <div class="cp-playback-row">
@@ -126,8 +131,12 @@
           <div class="progress-bar"><div id="cpPlayFill" class="progress-fill"></div></div>
         </div>
       </div>
+      <!-- Static only: seek scrubber -->
+      <div class="cp-scrub-row" id="cpScrubRow" style="display:none">
+        <input type="range" id="cpScrubBar" class="cp-scrub-bar" min="0" max="100" step="0.01" value="0" />
+      </div>
       <div class="cp-stats-section">
-        <div class="cp-stats-heading">Counts · selected window</div>
+        <div class="cp-stats-heading" id="cpStatsHeading">Counts · selected window</div>
         <div id="cpDetailStats" class="cp-stats-grid"></div>
       </div>
     </div>
@@ -217,13 +226,13 @@
   </div>
 </div>
 
-<script src="js/data.js?v=3"></script>
-<script src="js/map.js?v=3"></script>
-<script src="js/heatmap.js?v=3"></script>
-<script src="js/animation.js?v=3"></script>
-<script src="js/cameras.js?v=3"></script>
-<script src="js/settings.js?v=3"></script>
-<script src="js/realtime.js?v=3"></script>
-<script src="js/app.js?v=3"></script>
+<script src="js/data.js?v=4"></script>
+<script src="js/map.js?v=4"></script>
+<script src="js/heatmap.js?v=4"></script>
+<script src="js/animation.js?v=4"></script>
+<script src="js/cameras.js?v=4"></script>
+<script src="js/settings.js?v=4"></script>
+<script src="js/realtime.js?v=4"></script>
+<script src="js/app.js?v=4"></script>
 </body>
 </html>

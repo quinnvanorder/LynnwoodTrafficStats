@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -47,6 +48,86 @@ def _ensure_git_repo(repo_url: str, branch: str) -> bool:
     return True
 
 
+def _export_camera_video(cam_id: int, data_dir: Path) -> None:
+    """Build data/cameras/{id}/video.webm and index.json from retained snapshots."""
+    snaps = database.get_snapshots(camera_id=cam_id, limit=100_000)
+    snaps.sort(key=lambda s: s["captured_at"])
+
+    # Collect frame paths (annotated preferred, fall back to raw)
+    frame_paths: list[Path] = []
+    index: list[dict] = []
+    fps = 4
+
+    for snap in snaps:
+        img_rel = snap.get("annotated_path") or snap.get("image_path")
+        if not img_rel:
+            continue
+        full = DATA_DIR / img_rel
+        if not full.exists():
+            continue
+        frame_paths.append(full)
+        index.append({
+            "t": 0,  # filled in below after filtering
+            "ts": snap["captured_at"],
+            "car_count":        snap.get("car_count", 0),
+            "truck_count":      snap.get("truck_count", 0),
+            "bus_count":        snap.get("bus_count", 0),
+            "motorcycle_count": snap.get("motorcycle_count", 0),
+            "person_count":     snap.get("person_count", 0),
+            "bicycle_count":    snap.get("bicycle_count", 0),
+            "total_count":      snap.get("total_count", 0),
+        })
+
+    if not frame_paths:
+        logger.debug("No frames for camera %d — skipping video export", cam_id)
+        return
+
+    for i, entry in enumerate(index):
+        entry["t"] = round(i / fps, 4)
+
+    out_dir = data_dir / "cameras" / str(cam_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "index.json").write_text(json.dumps(index))
+
+    # Build ffmpeg concat list — duplicate last frame to avoid VP9 truncation
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, dir="/tmp") as flist:
+        for p in frame_paths:
+            flist.write(f"file '{p}'\nduration {1/fps}\n")
+        flist.write(f"file '{frame_paths[-1]}'\n")
+        flist_path = flist.name
+
+    video_path = out_dir / "video.webm"
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0", "-i", flist_path,
+                "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                "-c:v", "libvpx-vp9",
+                "-b:v", "0", "-crf", "33",
+                "-deadline", "good", "-cpu-used", "5",
+                "-an",
+                str(video_path),
+            ],
+            capture_output=True,
+            timeout=600,
+        )
+        if result.returncode != 0:
+            logger.error("ffmpeg failed for camera %d: %s", cam_id, result.stderr.decode()[-500:])
+        else:
+            size_kb = video_path.stat().st_size // 1024
+            logger.info("Camera %d video: %d frames → %s (%d KB)", cam_id, len(frame_paths), video_path.name, size_kb)
+    except FileNotFoundError:
+        logger.error("ffmpeg not found — add it to the Docker image")
+    except subprocess.TimeoutExpired:
+        logger.error("ffmpeg timed out for camera %d", cam_id)
+    finally:
+        try:
+            os.unlink(flist_path)
+        except OSError:
+            pass
+
+
 def generate_static_site() -> None:
     cfg = settings.load()
     repo_url = cfg.get("git_repo_url", "")
@@ -66,6 +147,10 @@ def generate_static_site() -> None:
 
     cameras = database.get_cameras(active_only=False)
     (data_dir / "cameras.json").write_text(json.dumps(cameras, default=str))
+
+    # Per-camera video + frame index for the static site player
+    for cam in cameras:
+        _export_camera_video(cam["id"], data_dir)
 
     hourly = database.get_hourly_aggregates()
     (data_dir / "snapshots_aggregated.json").write_text(json.dumps(hourly, default=str))
