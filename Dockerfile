@@ -4,7 +4,8 @@ WORKDIR /build
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-# Install playwright + chromium with deps (builder has full apt access)
+# Install playwright + chromium into a fixed path accessible by any user
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN pip install --no-cache-dir playwright && \
     playwright install chromium --with-deps
 
@@ -21,7 +22,6 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
     netcat-openbsd \
     git \
     openssh-client \
-    # Chromium runtime libraries (Debian trixie names, many have t64 suffix)
     libnss3 \
     libnspr4 \
     libatk1.0-0t64 \
@@ -43,10 +43,12 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
     fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy playwright browsers from builder
-COPY --from=builder /root/.cache/ms-playwright /root/.cache/ms-playwright
+# Copy playwright browsers to the same fixed path, readable by all users
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+COPY --from=builder /ms-playwright /ms-playwright
+RUN chmod -R a+rX /ms-playwright
 
-# Copy installed Python packages (includes playwright + all requirements)
+# Copy installed Python packages
 COPY --from=builder /install /usr/local
 
 WORKDIR /app
