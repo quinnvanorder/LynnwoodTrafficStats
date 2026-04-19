@@ -1,6 +1,5 @@
 import logging
 import os
-import re
 
 import requests
 from playwright.sync_api import sync_playwright
@@ -17,7 +16,6 @@ MARKERINFO_API = (
     "https://www.lynnwoodwa.gov/ocapi/get/markerinfo/{content_id}"
     "/en-US?mainContentId=00000000-0000-0000-0000-000000000000"
 )
-DACAST_ACCESS_API = "https://playback.dacast.com/content/access?contentId={content_id}&provider=universe"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_HEADERS = {"User-Agent": "LynnwoodTrafficStats/1.0 (quinn@qmvo.org)"}
 BROWSER_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"]
@@ -66,22 +64,29 @@ def _get_subpage_link(content_id: str) -> str | None:
         return None
 
 
-def _get_hls_url(subpage_url: str) -> str | None:
-    """Fetch a camera subpage, extract the Dacast contentId, and return the HLS stream URL."""
+def _get_hls_url(browser, subpage_url: str) -> str | None:
+    """Load a camera subpage in a fresh browser page and capture the HLS URL from the Dacast access API response."""
+    hls_url = None
+    page = browser.new_page()
+
+    def on_response(response):
+        nonlocal hls_url
+        if "playback.dacast.com/content/access" in response.url and "provider=universe" in response.url:
+            try:
+                data = response.json()
+                hls_url = data.get("hls") or hls_url
+            except Exception:
+                pass
+
+    page.on("response", on_response)
     try:
-        r = requests.get(subpage_url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-        r.raise_for_status()
-        m = re.search(r'contentId=([A-Za-z0-9-]+-live-[A-Za-z0-9-]+)', r.text)
-        if not m:
-            logger.warning("No Dacast contentId found on %s", subpage_url)
-            return None
-        content_id = m.group(1)
-        ar = requests.get(DACAST_ACCESS_API.format(content_id=content_id), timeout=10)
-        ar.raise_for_status()
-        return ar.json().get("hls")
+        page.goto(subpage_url, wait_until="networkidle", timeout=30000)
     except Exception as e:
-        logger.warning("Failed to get HLS URL from %s: %s", subpage_url, e)
-        return None
+        logger.warning("Failed to load subpage %s: %s", subpage_url, e)
+    finally:
+        page.close()
+
+    return hls_url
 
 
 def discover_cameras() -> int:
@@ -103,7 +108,6 @@ def discover_cameras() -> int:
             return 0
 
         logger.info("Layer data: %d cameras", len(layer_items))
-        browser.close()
 
         for item in layer_items:
             content_id = item.get("ContentId", "")
@@ -130,7 +134,7 @@ def discover_cameras() -> int:
                 logger.warning("No subpage link for %s — skipping", address)
                 continue
 
-            hls_url = _get_hls_url(subpage_link)
+            hls_url = _get_hls_url(browser, subpage_link)
             if not hls_url:
                 logger.warning("No HLS URL for %s — skipping", address)
                 continue
@@ -139,6 +143,8 @@ def discover_cameras() -> int:
             seen_urls.append(hls_url)
             found += 1
             logger.info("Camera: %s  lat=%.5f lon=%.5f  url=%s", address, lat, lon, hls_url)
+
+        browser.close()
 
     database.deactivate_missing_cameras(seen_urls)
     logger.info("Discovery complete: %d cameras upserted", found)
