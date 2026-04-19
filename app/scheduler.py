@@ -70,13 +70,15 @@ def _fetch_image(url: str) -> Image.Image | None:
         return None
 
 
-def _save_image(camera_id: int, image: Image.Image, captured_at: str) -> str | None:
+def _save_image(camera_id: int, image: Image.Image, captured_at: str, subdir: str | None = None) -> str | None:
     try:
         cam_dir = IMAGES_DIR / str(camera_id)
+        if subdir:
+            cam_dir = cam_dir / subdir
         cam_dir.mkdir(parents=True, exist_ok=True)
         safe_ts = captured_at.replace(":", "-").replace(" ", "T")
         path = cam_dir / f"{safe_ts}.webp"
-        image.save(path, "WEBP", quality=70)
+        image.save(path, "WEBP", quality=80)
         return str(path.relative_to(DATA_DIR))
     except Exception as e:
         logger.warning("Failed to save image for camera %d: %s", camera_id, e)
@@ -110,12 +112,15 @@ def snapshot_job() -> None:
         if img is None:
             continue
 
-        counts = detection.detect(img, model_name=model_name, confidence=confidence)
+        counts, annotated_img = detection.detect(img, model_name=model_name, confidence=confidence)
 
         captured_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         image_path = _save_image(cam["id"], img, captured_at)
-        snap_id = database.insert_snapshot(cam["id"], image_path, counts, captured_at)
+        annotated_path = _save_image(cam["id"], annotated_img, captured_at, subdir="annotated")
+        snap_id = database.insert_snapshot(
+            cam["id"], image_path, counts, captured_at, annotated_path=annotated_path
+        )
         _prune_images(cam["id"], retention)
 
         results.append({**counts, "camera_id": cam["id"], "snapshot_id": snap_id,

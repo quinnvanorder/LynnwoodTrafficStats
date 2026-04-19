@@ -5,7 +5,10 @@ const CameraPanel = (() => {
     car_count: 'Cars', truck_count: 'Trucks', bus_count: 'Buses',
     motorcycle_count: 'Motorcycles', person_count: 'Pedestrians', bicycle_count: 'Cyclists',
   };
-  const WINDOW_HOURS = { '1h': 1, '1d': 24, '1w': 168, '1m': 720, '6m': 4380, '1y': 8760, '5y': 43800 };
+  const WINDOW_HOURS = {
+    '5m': 5/60, '10m': 10/60, '30m': 0.5,
+    '1h': 1, '1d': 24, '1w': 168, '1m': 720, '6m': 4380, '1y': 8760, '5y': 43800,
+  };
 
   let _stats = [];
   let _selectedId = null;
@@ -109,8 +112,9 @@ const CameraPanel = (() => {
     // Load latest image
     const snaps = await fetch(`/api/snapshots?camera_id=${cam.id}&limit=1`).then(r => r.json());
     if (snaps.length && snaps[0].image_path) {
-      detailImage.src = '/data/' + snaps[0].image_path;
-      detailTimestamp.textContent = _fmtTs(snaps[0].captured_at);
+      const snap = snaps[0];
+      detailImage.src = '/data/' + (snap.annotated_path || snap.image_path);
+      detailTimestamp.textContent = _fmtTs(snap.captured_at);
     }
 
     // Pre-load playback frames for this window
@@ -143,9 +147,10 @@ const CameraPanel = (() => {
     _playTimer = setInterval(() => {
       if (_playIndex >= _playFrames.length) { _stopPlay(); return; }
       const f = _playFrames[_playIndex++];
-      detailImage.src = '/data/' + f.image_path;
+      detailImage.src = '/data/' + (f.annotated_path || f.image_path);
       detailTimestamp.textContent = _fmtTs(f.captured_at);
       playFill.style.width = ((_playIndex / _playFrames.length) * 100) + '%';
+      _updateDetailStats(f);
     }, 250);
   }
 
@@ -153,13 +158,16 @@ const CameraPanel = (() => {
     if (_playTimer) { clearInterval(_playTimer); _playTimer = null; }
     playBtn.style.display = '';
     stopBtn.style.display = 'none';
+    // Restore time-window aggregate counts
+    const cam = _stats.find(c => c.id === _selectedId);
+    if (cam) _updateDetailStats(cam);
   }
 
   function _back() {
     _stopPlay();
     _selectedId = null;
     detailView.style.display = 'none';
-    listView.style.display = 'flex';
+    listView.style.display = '';
     _renderList();
   }
 

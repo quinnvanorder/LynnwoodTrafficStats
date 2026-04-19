@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -32,8 +33,12 @@ def _get_model(model_name: str = "yolov8n.pt"):
     return _model
 
 
-def detect(image: Image.Image, model_name: str = "yolov8n.pt", confidence: float = 0.4) -> dict:
-    """Run detection on a PIL image. Returns count dict."""
+def detect(
+    image: Image.Image,
+    model_name: str = "yolov8n.pt",
+    confidence: float = 0.4,
+) -> tuple[dict, Image.Image]:
+    """Run detection on a PIL image. Returns (count dict, annotated image)."""
     model = _get_model(model_name)
     img_array = np.array(image)
     results = model(img_array, conf=confidence, verbose=False)
@@ -46,4 +51,7 @@ def detect(image: Image.Image, model_name: str = "yolov8n.pt", confidence: float
             cls_id = int(cls_id)
             if cls_id in WANTED_CLASSES:
                 counts[WANTED_CLASSES[cls_id]] += 1
-    return counts
+
+    annotated_bgr = results[0].plot()
+    annotated_img = Image.fromarray(cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB))
+    return counts, annotated_img

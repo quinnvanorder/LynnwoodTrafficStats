@@ -47,6 +47,7 @@ def init_db() -> None:
                 camera_id         INTEGER NOT NULL REFERENCES cameras(id),
                 captured_at       TEXT    NOT NULL DEFAULT (datetime('now')),
                 image_path        TEXT,
+                annotated_path    TEXT,
                 person_count      INTEGER NOT NULL DEFAULT 0,
                 bicycle_count     INTEGER NOT NULL DEFAULT 0,
                 motorcycle_count  INTEGER NOT NULL DEFAULT 0,
@@ -59,6 +60,11 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_snapshots_camera_time
                 ON snapshots (camera_id, captured_at);
         """)
+        # Migration: add annotated_path if DB predates it
+        try:
+            db.execute("ALTER TABLE snapshots ADD COLUMN annotated_path TEXT")
+        except Exception:
+            pass
 
 
 # ── cameras ──────────────────────────────────────────────────────────────────
@@ -114,6 +120,7 @@ def insert_snapshot(
     image_path: str | None,
     counts: dict,
     captured_at: str | None = None,
+    annotated_path: str | None = None,
 ) -> int:
     total = sum(counts.get(k, 0) for k in
                 ("person_count", "bicycle_count", "motorcycle_count",
@@ -121,11 +128,12 @@ def insert_snapshot(
     with get_db() as db:
         cur = db.execute("""
             INSERT INTO snapshots
-                (camera_id, captured_at, image_path, person_count, bicycle_count, motorcycle_count,
+                (camera_id, captured_at, image_path, annotated_path,
+                 person_count, bicycle_count, motorcycle_count,
                  car_count, bus_count, truck_count, total_count)
-            VALUES (?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')), ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')), ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            camera_id, captured_at, image_path,
+            camera_id, captured_at, image_path, annotated_path,
             counts.get("person_count", 0),
             counts.get("bicycle_count", 0),
             counts.get("motorcycle_count", 0),
@@ -222,19 +230,25 @@ def get_hourly_aggregates(start: str | None = None, end: str | None = None) -> l
 
 
 def prune_images(camera_id: int, retention_count: int) -> list[str]:
-    """Return image_path values for snapshots beyond retention_count for this camera."""
+    """Return all image paths for snapshots beyond retention_count for this camera."""
     with get_db() as db:
         rows = db.execute("""
-            SELECT id, image_path FROM snapshots
+            SELECT id, image_path, annotated_path FROM snapshots
             WHERE camera_id = ? AND image_path IS NOT NULL
             ORDER BY captured_at DESC
             LIMIT -1 OFFSET ?
         """, (camera_id, retention_count)).fetchall()
         ids = [r["id"] for r in rows]
-        paths = [r["image_path"] for r in rows if r["image_path"]]
+        paths = []
+        for r in rows:
+            if r["image_path"]:
+                paths.append(r["image_path"])
+            if r["annotated_path"]:
+                paths.append(r["annotated_path"])
         if ids:
             db.execute(
-                f"UPDATE snapshots SET image_path = NULL WHERE id IN ({','.join('?'*len(ids))})",
+                f"UPDATE snapshots SET image_path = NULL, annotated_path = NULL"
+                f" WHERE id IN ({','.join('?'*len(ids))})",
                 ids,
             )
         return paths

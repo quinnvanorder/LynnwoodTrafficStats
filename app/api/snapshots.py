@@ -7,6 +7,9 @@ from .. import database
 router = APIRouter(prefix="/api", tags=["snapshots"])
 
 TIME_WINDOWS = {
+    "5m":     timedelta(minutes=5),
+    "10m":    timedelta(minutes=10),
+    "30m":    timedelta(minutes=30),
     "1h":     timedelta(hours=1),
     "1d":     timedelta(days=1),
     "1w":     timedelta(weeks=1),
