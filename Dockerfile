@@ -16,7 +16,7 @@ RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')" && \
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    su-exec \
+    gosu \
     netcat-openbsd \
     git \
     openssh-client \

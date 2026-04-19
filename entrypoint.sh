@@ -27,4 +27,4 @@ if [ ! -f /data/models/yolov8n.pt ] && [ -f /app/weights/yolov8n.pt ]; then
     chown appuser:appuser /data/models/yolov8n.pt
 fi
 
-exec su-exec appuser "$@"
+exec gosu appuser "$@"
