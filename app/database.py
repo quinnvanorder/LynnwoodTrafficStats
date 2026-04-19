@@ -161,30 +161,29 @@ def get_snapshots(camera_id: int | None = None, start: str | None = None,
 
 def get_stats(start: str | None = None, end: str | None = None) -> list[dict]:
     """Aggregate counts per camera for the given time window."""
-    conditions, params = [], []
+    join_cond = " AND s.camera_id = c.id"
+    params = []
     if start:
-        conditions.append("s.captured_at >= ?")
+        join_cond += " AND s.captured_at >= ?"
         params.append(start)
     if end:
-        conditions.append("s.captured_at <= ?")
+        join_cond += " AND s.captured_at <= ?"
         params.append(end)
 
-    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     with get_db() as db:
         rows = db.execute(f"""
             SELECT
                 c.id, c.address, c.lat, c.lon, c.url,
-                SUM(s.person_count)     AS person_count,
-                SUM(s.bicycle_count)    AS bicycle_count,
-                SUM(s.motorcycle_count) AS motorcycle_count,
-                SUM(s.car_count)        AS car_count,
-                SUM(s.bus_count)        AS bus_count,
-                SUM(s.truck_count)      AS truck_count,
-                SUM(s.total_count)      AS total_count,
-                COUNT(s.id)             AS snapshot_count
+                COALESCE(SUM(s.person_count), 0)     AS person_count,
+                COALESCE(SUM(s.bicycle_count), 0)    AS bicycle_count,
+                COALESCE(SUM(s.motorcycle_count), 0) AS motorcycle_count,
+                COALESCE(SUM(s.car_count), 0)        AS car_count,
+                COALESCE(SUM(s.bus_count), 0)        AS bus_count,
+                COALESCE(SUM(s.truck_count), 0)      AS truck_count,
+                COALESCE(SUM(s.total_count), 0)      AS total_count,
+                COUNT(s.id)                          AS snapshot_count
             FROM cameras c
-            LEFT JOIN snapshots s ON s.camera_id = c.id
-            {where}
+            LEFT JOIN snapshots s ON{join_cond}
             GROUP BY c.id
             ORDER BY c.address
         """, params).fetchall()
