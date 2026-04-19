@@ -115,7 +115,7 @@ def snapshot_job() -> None:
         captured_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         image_path = _save_image(cam["id"], img, captured_at)
-        snap_id = database.insert_snapshot(cam["id"], image_path, counts)
+        snap_id = database.insert_snapshot(cam["id"], image_path, counts, captured_at)
         _prune_images(cam["id"], retention)
 
         results.append({**counts, "camera_id": cam["id"], "snapshot_id": snap_id,

@@ -24,7 +24,9 @@ FROM python:3.12-slim
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_WARN_SCRIPT_LOCATION=1 \
-    PIP_ROOT_USER_ACTION=ignore
+    PIP_ROOT_USER_ACTION=ignore \
+    NNPACK_DISABLE=1 \
+    PYTORCH_NO_CUDA_MEMORY_CACHING=1
 
 RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
     gosu \

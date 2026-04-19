@@ -113,6 +113,7 @@ def insert_snapshot(
     camera_id: int,
     image_path: str | None,
     counts: dict,
+    captured_at: str | None = None,
 ) -> int:
     total = sum(counts.get(k, 0) for k in
                 ("person_count", "bicycle_count", "motorcycle_count",
@@ -120,11 +121,11 @@ def insert_snapshot(
     with get_db() as db:
         cur = db.execute("""
             INSERT INTO snapshots
-                (camera_id, image_path, person_count, bicycle_count, motorcycle_count,
+                (camera_id, captured_at, image_path, person_count, bicycle_count, motorcycle_count,
                  car_count, bus_count, truck_count, total_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')), ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            camera_id, image_path,
+            camera_id, captured_at, image_path,
             counts.get("person_count", 0),
             counts.get("bicycle_count", 0),
             counts.get("motorcycle_count", 0),
