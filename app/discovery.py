@@ -1,15 +1,24 @@
 import logging
-import re
+import os
 
 import requests
+from playwright.sync_api import sync_playwright
 
 from . import database
 
 logger = logging.getLogger(__name__)
 
-CAMERA_PAGE_URL = "https://www.lynnwoodwa.gov/Government/Departments/Public-Works/Streets-Traffic-and-Transportation/Traffic-Cameras"
+CAMERAS_PAGE = (
+    "https://www.lynnwoodwa.gov/Government/Departments/Public-Works"
+    "/Streets-Traffic-and-Transportation/Traffic-Cameras"
+)
+MARKERINFO_API = (
+    "https://www.lynnwoodwa.gov/ocapi/get/markerinfo/{content_id}"
+    "/en-US?mainContentId=00000000-0000-0000-0000-000000000000"
+)
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_HEADERS = {"User-Agent": "LynnwoodTrafficStats/1.0 (quinn@qmvo.org)"}
+BROWSER_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"]
 
 
 def _geocode(address: str) -> tuple[float, float] | None:
@@ -28,108 +37,102 @@ def _geocode(address: str) -> tuple[float, float] | None:
     return None
 
 
-def _scrape_with_playwright() -> list[dict]:
-    """Scrape camera list from lynnwoodwa.gov using Playwright."""
-    from playwright.sync_api import sync_playwright
+def _capture_layer_items(page) -> list[dict]:
+    """Navigate to the cameras page and capture the /ocmaps/layer XHR response."""
+    captured: list[dict] = []
 
-    cameras = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
-        page = browser.new_page()
-        try:
-            page.goto(CAMERA_PAGE_URL, wait_until="networkidle", timeout=30000)
+    def on_response(response):
+        if "ocmaps/layer" in response.url:
+            try:
+                data = response.json()
+                captured.extend(data.get("layerItems", []))
+            except Exception:
+                pass
 
-            # Find all "Tell me more about" links which go directly to camera images
-            links = page.query_selector_all("a[href*='camera'], a[href*='Camera']")
-
-            # Also try to find the main camera links from the page structure
-            # The page lists street names with links to camera image URLs
-            all_links = page.query_selector_all("a")
-            for link in all_links:
-                href = link.get_attribute("href") or ""
-                text = (link.inner_text() or "").strip()
-
-                # Camera image links typically end in .jpg or point to camera endpoints
-                if re.search(r"\.(jpg|jpeg|png|mjpg)(\?|$)", href, re.I):
-                    cameras.append({"url": href, "address": text or href, "lat": None, "lon": None})
-                    continue
-
-                # "Tell me more" style links that open camera pages
-                if "camera" in href.lower() and href.startswith("http"):
-                    # Try to fetch the linked page to find the actual image URL
-                    try:
-                        cam_page = browser.new_page()
-                        cam_page.goto(href, wait_until="domcontentloaded", timeout=15000)
-                        img = cam_page.query_selector("img[src*='camera'], img[src*='stream'], img[src*='.jpg']")
-                        if img:
-                            img_url = img.get_attribute("src")
-                            if img_url:
-                                cameras.append({"url": img_url, "address": text or href, "lat": None, "lon": None})
-                        cam_page.close()
-                    except Exception as e:
-                        logger.debug("Skipping camera link %s: %s", href, e)
-
-        finally:
-            browser.close()
-
-    return cameras
+    page.on("response", on_response)
+    page.goto(CAMERAS_PAGE, wait_until="networkidle", timeout=30000)
+    return captured
 
 
-def _scrape_with_requests() -> list[dict]:
-    """Fallback: try direct HTTP with browser-like headers."""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    }
+def _get_subpage_link(content_id: str) -> str | None:
     try:
-        resp = requests.get(CAMERA_PAGE_URL, headers=headers, timeout=15)
-        resp.raise_for_status()
-        html = resp.text
-
-        cameras = []
-        # Find image URLs in page content
-        for match in re.finditer(r'https?://[^\s"\'<>]+\.(?:jpg|jpeg|png|mjpg)(?:\?[^\s"\'<>]*)?', html, re.I):
-            url = match.group(0)
-            cameras.append({"url": url, "address": url, "lat": None, "lon": None})
-        return cameras
+        r = requests.get(MARKERINFO_API.format(content_id=content_id), timeout=10)
+        r.raise_for_status()
+        return r.json()["markerInfo"]["Link"]
     except Exception as e:
-        logger.warning("Direct HTTP scrape failed: %s", e)
-        return []
+        logger.warning("markerinfo failed for %s: %s", content_id, e)
+        return None
+
+
+def _get_dacast_thumbnail(page, subpage_url: str) -> str | None:
+    """Load a camera subpage with Playwright and return the Dacast thumbnail URL."""
+    try:
+        page.goto(subpage_url, wait_until="networkidle", timeout=30000)
+        img = page.query_selector('img[src*="dacast.com"]')
+        if img:
+            return img.get_attribute("src")
+    except Exception as e:
+        logger.warning("Failed to get thumbnail from %s: %s", subpage_url, e)
+    return None
 
 
 def discover_cameras() -> int:
-    """Scrape lynnwoodwa.gov, upsert cameras into DB. Returns count of new/updated cameras."""
+    """Discover all cameras from lynnwoodwa.gov and upsert into the DB."""
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/ms-playwright"
     logger.info("Starting camera discovery")
 
-    try:
-        raw = _scrape_with_playwright()
-    except Exception as e:
-        logger.warning("Playwright scrape failed (%s), trying requests fallback", e)
-        raw = _scrape_with_requests()
+    found = 0
+    seen_urls: list[str] = []
 
-    if not raw:
-        logger.warning("No cameras discovered")
-        return 0
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=BROWSER_ARGS)
+        page = browser.new_page()
 
-    seen_urls = []
-    count = 0
-    for cam in raw:
-        url = cam["url"]
-        address = cam["address"]
-        lat, lon = cam.get("lat"), cam.get("lon")
+        layer_items = _capture_layer_items(page)
+        if not layer_items:
+            logger.warning("No cameras found in /ocmaps/layer — page structure may have changed")
+            browser.close()
+            return 0
 
-        if lat is None or lon is None:
-            coords = _geocode(address)
-            if coords:
-                lat, lon = coords
-            else:
-                # Default to Lynnwood city center if geocoding fails
-                lat, lon = 47.8209, -122.3151
+        logger.info("Layer data: %d cameras", len(layer_items))
 
-        database.upsert_camera(url, address, lat, lon, is_custom=0)
-        seen_urls.append(url)
-        count += 1
+        for item in layer_items:
+            content_id = item.get("ContentId", "")
+            address = item.get("ContentTitle", "").strip()
+            try:
+                lat = float(item.get("Lat", 0))
+                lon = float(str(item.get("Lng", "0")).strip())
+            except ValueError:
+                lat, lon = 0.0, 0.0
+
+            if not content_id:
+                continue
+
+            # GPS from layer data is accurate — only fall back to geocoding if missing
+            if lat == 0.0 and lon == 0.0:
+                coords = _geocode(address)
+                if coords:
+                    lat, lon = coords
+                else:
+                    lat, lon = 47.8209, -122.3151
+
+            subpage_link = _get_subpage_link(content_id)
+            if not subpage_link:
+                logger.warning("No subpage link for %s — skipping", address)
+                continue
+
+            thumbnail_url = _get_dacast_thumbnail(page, subpage_link)
+            if not thumbnail_url:
+                logger.warning("No Dacast thumbnail for %s — skipping", address)
+                continue
+
+            database.upsert_camera(thumbnail_url, address, lat, lon, is_custom=0)
+            seen_urls.append(thumbnail_url)
+            found += 1
+            logger.info("Camera: %s  lat=%.5f lon=%.5f  url=%s", address, lat, lon, thumbnail_url)
+
+        browser.close()
 
     database.deactivate_missing_cameras(seen_urls)
-    logger.info("Discovery complete: %d cameras found", count)
-    return count
+    logger.info("Discovery complete: %d cameras upserted", found)
+    return found
