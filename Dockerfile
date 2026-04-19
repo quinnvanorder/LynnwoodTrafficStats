@@ -1,5 +1,9 @@
 FROM python:3.12-slim AS builder
 
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_WARN_SCRIPT_LOCATION=1 \
+    PIP_ROOT_USER_ACTION=ignore
+
 WORKDIR /build
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
@@ -12,6 +16,10 @@ RUN PYTHONPATH=/install/lib/python3.12/site-packages python -c "from ultralytics
 
 
 FROM python:3.12-slim
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_WARN_SCRIPT_LOCATION=1 \
+    PIP_ROOT_USER_ACTION=ignore
 
 # Install chromium runtime deps manually — playwright install-deps uses Ubuntu package names
 # that don't exist on Debian trixie. These are the correct Debian equivalents.
