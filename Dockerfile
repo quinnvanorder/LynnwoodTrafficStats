@@ -8,9 +8,8 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 RUN pip install --no-cache-dir playwright && \
     playwright install chromium --with-deps
 
-# Pre-download YOLOv8 nano weights
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')" && \
-    find /root -name "yolov8n.pt" -exec cp {} /tmp/yolov8n.pt \; 2>/dev/null || true
+# Pre-download YOLOv8 nano weights — ultralytics saves to WORKDIR (/build/yolov8n.pt)
+RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
 
 FROM python:3.12-slim
@@ -54,7 +53,7 @@ WORKDIR /app
 COPY . .
 
 # Bundle weights inside the image (not under /data which is a volume mount)
-COPY --from=builder /tmp/yolov8n.pt /app/weights/yolov8n.pt
+COPY --from=builder /build/yolov8n.pt /app/weights/yolov8n.pt
 
 RUN chmod +x /app/entrypoint.sh
 
