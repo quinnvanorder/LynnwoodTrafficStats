@@ -1,6 +1,8 @@
+import cv2
 import io
 import logging
 import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,7 +20,47 @@ IMAGES_DIR = DATA_DIR / "images"
 _scheduler: BackgroundScheduler | None = None
 
 
+def _fetch_hls_frame(hls_url: str) -> Image.Image | None:
+    try:
+        r = requests.get(hls_url, timeout=10)
+        r.raise_for_status()
+        base = hls_url.rsplit("/", 1)[0]
+        stream_path = next((l for l in r.text.splitlines() if l and not l.startswith("#")), None)
+        if not stream_path:
+            return None
+        stream_url = base + "/" + stream_path
+
+        r2 = requests.get(stream_url, timeout=10)
+        r2.raise_for_status()
+        seg_base = stream_url.rsplit("/", 1)[0]
+        seg = next((l for l in r2.text.splitlines() if l and not l.startswith("#")), None)
+        if not seg:
+            return None
+        seg_url = seg if seg.startswith("http") else seg_base + "/" + seg
+
+        seg_data = requests.get(seg_url, timeout=30).content
+        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
+            f.write(seg_data)
+            tmp = f.name
+        try:
+            cap = cv2.VideoCapture(tmp)
+            ok, frame = cap.read()
+            cap.release()
+            if not ok:
+                logger.warning("cv2 could not decode frame from %s", seg_url)
+                return None
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            return Image.fromarray(frame_rgb)
+        finally:
+            os.unlink(tmp)
+    except Exception as e:
+        logger.warning("Failed to fetch HLS frame from %s: %s", hls_url, e)
+        return None
+
+
 def _fetch_image(url: str) -> Image.Image | None:
+    if url.endswith(".m3u8"):
+        return _fetch_hls_frame(url)
     try:
         resp = requests.get(url, timeout=10, stream=True)
         resp.raise_for_status()
