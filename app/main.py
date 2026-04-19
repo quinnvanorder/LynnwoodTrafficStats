@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -23,16 +25,19 @@ async def lifespan(app: FastAPI):
     cfg = settings.load()
     settings.save(cfg)  # write defaults if missing
 
+    from . import sse
+    sse.set_loop(asyncio.get_event_loop())
+
     scheduler.start(
         snapshot_interval=cfg["snapshot_interval_seconds"],
         export_interval=cfg["static_export_interval_seconds"],
     )
 
-    # Run initial discovery if no cameras exist
+    # Run initial discovery in a background thread if no cameras exist
     cameras_list = database.get_cameras(active_only=False)
     if not cameras_list:
-        logger.info("No cameras in DB — triggering initial discovery")
-        scheduler.trigger_discovery()
+        logger.info("No cameras in DB — starting initial discovery")
+        threading.Thread(target=scheduler.discovery_job, daemon=True).start()
 
     yield
 

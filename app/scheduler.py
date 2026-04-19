@@ -123,17 +123,17 @@ def reschedule(snapshot_interval: int, export_interval: int) -> None:
 
 def trigger_snapshot() -> None:
     if _scheduler:
-        _scheduler.add_job(snapshot_job, id="snapshot_manual", replace_existing=True)
+        _scheduler.add_job(snapshot_job, trigger="date", id="snapshot_manual", replace_existing=True)
 
 
 def trigger_discovery() -> None:
     if _scheduler:
-        _scheduler.add_job(discovery_job, id="discovery_manual", replace_existing=True)
+        _scheduler.add_job(discovery_job, trigger="date", id="discovery_manual", replace_existing=True)
 
 
 def trigger_export() -> None:
     if _scheduler:
-        _scheduler.add_job(export_job, id="export_manual", replace_existing=True)
+        _scheduler.add_job(export_job, trigger="date", id="export_manual", replace_existing=True)
 
 
 def stop() -> None:

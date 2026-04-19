@@ -17,9 +17,12 @@ DEFAULTS = {
 
 def load() -> dict:
     if CONFIG_PATH.exists():
-        with open(CONFIG_PATH) as f:
-            data = json.load(f)
-        return {**DEFAULTS, **data}
+        try:
+            content = CONFIG_PATH.read_text().strip()
+            if content:
+                return {**DEFAULTS, **json.loads(content)}
+        except (json.JSONDecodeError, OSError):
+            pass
     return dict(DEFAULTS)
 
 
