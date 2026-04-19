@@ -62,6 +62,9 @@ const CameraPanel = (() => {
     playBtn.addEventListener('click', _startPlay);
     stopBtn.addEventListener('click', _stopPlay);
 
+    imageWrap.addEventListener('click', _openFullscreen);
+    videoWrap.addEventListener('click', _openFullscreen);
+
     scrubBar.addEventListener('mousedown', () => { _scrubbing = true; });
     scrubBar.addEventListener('touchstart', () => { _scrubbing = true; });
     scrubBar.addEventListener('input', () => {
@@ -134,6 +137,7 @@ const CameraPanel = (() => {
 
   async function _showDetail(cam) {
     _stopPlay();
+    panel.classList.add('wide');
     listView.style.display = 'none';
     detailView.style.display = 'flex';
     detailName.textContent = cam.address;
@@ -283,15 +287,79 @@ const CameraPanel = (() => {
   }
 
   function _back() {
+    _closeFullscreen();
     _stopPlay();
     if (_isStaticMode) {
       detailVideo.pause();
       detailVideo.src = '';
     }
     _selectedId = null;
+    panel.classList.remove('wide');
     detailView.style.display = 'none';
     listView.style.display = '';
     _renderList();
+  }
+
+  // ── Fullscreen ────────────────────────────────────────────────────────────────
+
+  let _fsOverlay = null;
+
+  function _openFullscreen() {
+    if (_fsOverlay) return;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'cp-fullscreen-overlay';
+
+    let media;
+    if (_isStaticMode) {
+      media = document.createElement('video');
+      media.src = detailVideo.src;
+      media.currentTime = detailVideo.currentTime;
+      media.playsinline = true;
+      media.muted = true;
+      media.style.maxWidth = '100%';
+      media.style.maxHeight = '100%';
+      if (!detailVideo.paused) media.play().catch(() => {});
+      // Keep the two videos in sync
+      detailVideo.ontimeupdate = () => {
+        _onVideoTimeUpdate();
+        if (Math.abs(media.currentTime - detailVideo.currentTime) > 0.5) {
+          media.currentTime = detailVideo.currentTime;
+        }
+      };
+    } else {
+      media = document.createElement('img');
+      media.src = detailImage.src;
+      media.alt = '';
+    }
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'cp-fullscreen-close';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', e => { e.stopPropagation(); _closeFullscreen(); });
+
+    overlay.appendChild(media);
+    overlay.appendChild(closeBtn);
+    document.body.appendChild(overlay);
+    _fsOverlay = overlay;
+
+    overlay.addEventListener('click', _closeFullscreen);
+    document.addEventListener('keydown', _fsEscHandler);
+  }
+
+  function _closeFullscreen() {
+    if (!_fsOverlay) return;
+    document.body.removeChild(_fsOverlay);
+    _fsOverlay = null;
+    document.removeEventListener('keydown', _fsEscHandler);
+    // Restore video timeupdate handler
+    if (_isStaticMode) {
+      detailVideo.ontimeupdate = _onVideoTimeUpdate;
+    }
+  }
+
+  function _fsEscHandler(e) {
+    if (e.key === 'Escape') _closeFullscreen();
   }
 
   function _updateDetailStats(obj) {

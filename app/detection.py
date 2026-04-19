@@ -36,9 +36,15 @@ def _get_model(model_name: str = "yolov8n.pt"):
     global _model
     if _model is None:
         from ultralytics import YOLO
+        import torch
+        # Disable NNPACK before any inference. NNPACK_DISABLE=1 env var doesn't
+        # suppress these warnings when PyTorch runs on background threads (the
+        # C++ → Python warning bridge is bypassed). This API call disables the
+        # NNPACK convolution path at the dispatcher level so it's never attempted.
+        if hasattr(torch.backends, "nnpack"):
+            torch.backends.nnpack.enabled = False
         model_path = MODELS_DIR / model_name
         if not model_path.exists():
-            # Download if missing (needs internet)
             model_path = model_name
         _model = YOLO(str(model_path))
     return _model
