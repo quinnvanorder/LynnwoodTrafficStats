@@ -44,7 +44,7 @@ html, body { height: 100%; font-family: system-ui, sans-serif; background: var(-
 .map-sidebar {
   width: var(--sidebar-w); flex-shrink: 0;
   background: var(--surface); border-right: 1px solid var(--border);
-  overflow-y: auto; padding: 12px 0;
+  overflow: hidden; padding: 12px 0;
   display: flex; flex-direction: column; gap: 0;
 }
 #map { flex: 1; }
@@ -76,17 +76,10 @@ select {
   content: ''; width: 12px; height: 12px; border-radius: 50%;
   background: var(--color); flex-shrink: 0;
 }
-.layer-item input[type=checkbox] { accent-color: var(--color); width: 15px; height: 15px; }
+.layer-item input[type=radio] { accent-color: var(--color); width: 15px; height: 15px; }
 
-/* ── Animation controls ── */
-.animation-controls { display: flex; flex-direction: column; gap: 8px; }
-.duration-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }
-.duration-row input[type=range] { flex: 1; accent-color: var(--accent); }
-.anim-buttons { display: flex; gap: 6px; }
-.anim-progress { display: flex; flex-direction: column; gap: 4px; }
 .progress-bar { height: 4px; background: var(--surface2); border-radius: 2px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width .1s; }
-.anim-timestamp { font-size: 11px; color: var(--text-muted); }
 
 /* ── Buttons ── */
 .btn-primary, .btn-secondary {
@@ -151,100 +144,62 @@ pre#publicKeyDisplay {
 }
 .camera-item-badge.custom { color: #86efac; border-color: #166534; background: #052e16; }
 
-/* ── Camera panel ── */
-.camera-panel {
-  width: 290px; flex-shrink: 0;
-  background: var(--surface); border-left: 1px solid var(--border);
-  display: flex; flex-direction: column; overflow: hidden;
-  transition: width .25s ease;
+/* ── Count bubble (map marker) ── */
+.cam-count-bubble {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: #fff; border: 2.5px solid rgb(49, 84, 114);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: rgb(49, 84, 114);
+  box-shadow: 0 1px 4px rgba(0,0,0,.4);
+  pointer-events: none;
 }
-.camera-panel.wide { width: 70%; }
-.cp-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
-}
-.cp-title { font-weight: 600; font-size: 14px; }
-.cp-close-btn {
-  background: none; border: none; color: var(--text-muted);
-  cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 4px;
-}
-.cp-close-btn:hover { background: var(--surface2); color: var(--text); }
 
-/* List view */
-.cp-list-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
-.cp-search-wrap { padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+/* ── Sidebar grow section (camera list) ── */
+.sidebar-section--grow {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0;
+  border-bottom: none; padding-bottom: 0;
+}
+
+.scam-toggle-btn {
+  width: 100%; background: none; border: none; color: var(--text);
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+  text-align: left; padding: 0 0 8px; cursor: pointer;
+}
+.scam-toggle-btn:hover { color: var(--accent); }
+
+.scam-body {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0;
+}
+.scam-search-wrap { padding: 0 0 8px; flex-shrink: 0; }
 .cp-search {
   width: 100%; background: var(--surface2); color: var(--text);
   border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px;
 }
-.cp-camera-list { flex: 1; overflow-y: auto; }
-.cp-camera-item {
-  padding: 10px 14px; border-bottom: 1px solid var(--border);
-  cursor: pointer; transition: background .1s;
-}
-.cp-camera-item:hover { background: var(--surface2); }
-.cp-camera-item.selected { background: var(--surface2); border-left: 3px solid var(--accent); }
-.cp-camera-name { font-size: 13px; font-weight: 500; margin-bottom: 2px; }
-.cp-camera-meta { font-size: 11px; color: var(--text-muted); }
+.scam-list { flex: 1; overflow-y: auto; }
 
-/* Detail view */
-.cp-detail-view { display: flex; flex-direction: column; flex: 1; overflow-y: auto; }
-.cp-detail-header {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+.scam-item { border-top: 1px solid var(--border); }
+.scam-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 0; cursor: pointer; gap: 6px;
 }
-.cp-back-btn {
-  background: none; border: none; color: var(--accent);
-  cursor: pointer; font-size: 12px; padding: 4px 6px; border-radius: 4px; white-space: nowrap;
-}
-.cp-back-btn:hover { background: var(--surface2); }
-.cp-detail-header h3 { font-size: 13px; font-weight: 600; line-height: 1.3; }
-.cp-image-wrap {
-  width: 100%; background: #000; aspect-ratio: 16/9; flex-shrink: 0;
-  overflow: hidden; cursor: zoom-in; position: relative;
-}
-.cp-detail-image { width: 100%; height: 100%; object-fit: contain; display: block; }
+.scam-header:hover .scam-name { color: var(--accent); }
+.scam-name { font-size: 12px; font-weight: 500; flex: 1; line-height: 1.3; }
+.scam-chevron { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
 
-/* Fullscreen overlay for camera image/video */
-.cp-fullscreen-overlay {
-  position: fixed; inset: 0; z-index: 9999;
-  background: rgba(0,0,0,.95);
-  display: flex; align-items: center; justify-content: center;
-  cursor: zoom-out;
+.scam-detail { padding: 0 0 10px; display: flex; flex-direction: column; gap: 6px; }
+.scam-image-wrap {
+  width: 100%; background: #000; aspect-ratio: 16/9;
+  overflow: hidden; border-radius: 4px;
 }
-.cp-fullscreen-overlay img,
-.cp-fullscreen-overlay video {
-  max-width: 100%; max-height: 100%; object-fit: contain; display: block;
-  pointer-events: none;
-}
-.cp-fullscreen-close {
-  position: absolute; top: 16px; right: 20px;
-  background: rgba(255,255,255,.15); border: none; color: #fff;
-  font-size: 22px; width: 44px; height: 44px; border-radius: 50%;
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  transition: background .15s;
-}
-.cp-fullscreen-close:hover { background: rgba(255,255,255,.3); }
-.cp-detail-ts { font-size: 11px; color: var(--text-muted); padding: 6px 12px; flex-shrink: 0; }
-.cp-playback-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
-}
+.scam-detail-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.scam-detail-ts { font-size: 10px; color: var(--text-muted); }
+.scam-playback-row { display: flex; align-items: center; gap: 6px; }
+.scam-scrub-row { padding: 0; }
+.scam-stats-heading { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+
 .btn-sm { padding: 5px 10px; font-size: 12px; white-space: nowrap; }
 .cp-play-bar { flex: 1; }
-.cp-scrub-row { padding: 4px 12px 0; flex-shrink: 0; }
 .cp-scrub-bar { width: 100%; accent-color: var(--accent); cursor: pointer; }
-
-.cp-stats-section { padding: 12px; }
-.cp-stats-heading { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
-.cp-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12px; }
+.cp-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; font-size: 11px; }
 .ds-label { color: var(--text-muted); }
 .ds-val { font-weight: 600; text-align: right; }
-
-/* ── Popup ── */
-.camera-popup { min-width: 200px; }
-.camera-popup h4 { font-size: 14px; margin-bottom: 8px; }
-.popup-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12px; }
-.popup-stat-label { color: #64748b; }
-.popup-stat-value { font-weight: 600; text-align: right; }
-.popup-snapshot-count { font-size: 11px; color: #64748b; margin-top: 8px; }

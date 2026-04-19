@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <link rel="stylesheet" href="css/main.css?v=5" />
+  <link rel="stylesheet" href="css/main.css?v=6" />
 </head>
 <body>
 
@@ -16,7 +16,6 @@
   <span class="brand">🚦 Lynnwood Traffic Stats</span>
   <div class="nav-links">
     <button class="nav-btn active" data-view="map">Map</button>
-    <button class="nav-btn" id="btnCameras">Cameras</button>
     <button class="nav-btn" data-view="settings">Settings</button>
   </div>
   <span class="status-dot" id="statusDot" title="Connecting…"></span>
@@ -44,45 +43,26 @@
     </div>
 
     <div class="sidebar-section">
-      <label class="section-label">Layers</label>
+      <label class="section-label">Show on Map</label>
       <div class="layer-list" id="layerList">
         <label class="layer-item" data-category="car_count" style="--color:#ef4444">
-          <input type="checkbox" checked /> Cars
+          <input type="radio" name="mapLayer" value="car_count" checked /> Cars
         </label>
         <label class="layer-item" data-category="truck_count" style="--color:#f97316">
-          <input type="checkbox" checked /> Trucks
+          <input type="radio" name="mapLayer" value="truck_count" /> Trucks
         </label>
         <label class="layer-item" data-category="bus_count" style="--color:#eab308">
-          <input type="checkbox" /> Buses
+          <input type="radio" name="mapLayer" value="bus_count" /> Buses
         </label>
         <label class="layer-item" data-category="motorcycle_count" style="--color:#a855f7">
-          <input type="checkbox" /> Motorcycles
+          <input type="radio" name="mapLayer" value="motorcycle_count" /> Motorcycles
         </label>
         <label class="layer-item" data-category="person_count" style="--color:#22c55e">
-          <input type="checkbox" /> Pedestrians
+          <input type="radio" name="mapLayer" value="person_count" /> Pedestrians
         </label>
         <label class="layer-item" data-category="bicycle_count" style="--color:#3b82f6">
-          <input type="checkbox" /> Cyclists
+          <input type="radio" name="mapLayer" value="bicycle_count" /> Cyclists
         </label>
-      </div>
-    </div>
-
-    <div class="sidebar-section">
-      <label class="section-label">Animation Playback</label>
-      <div class="animation-controls">
-        <div class="duration-row">
-          <span>Duration</span>
-          <input type="range" id="animDuration" min="5" max="120" value="30" step="5" />
-          <span id="animDurationLabel">30s</span>
-        </div>
-        <div class="anim-buttons">
-          <button id="btnPlay" class="btn-primary">▶ Play</button>
-          <button id="btnStop" class="btn-secondary" style="display:none">⏹ Stop</button>
-        </div>
-        <div class="anim-progress" id="animProgress" style="display:none">
-          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-          <span class="anim-timestamp" id="animTimestamp"></span>
-        </div>
       </div>
     </div>
 
@@ -90,57 +70,20 @@
       <a href="/api/export/csv" class="btn-secondary btn-full" id="csvLink">⬇ Download CSV</a>
     </div>
 
+    <!-- Collapsible camera list -->
+    <div class="sidebar-section sidebar-section--grow">
+      <button class="scam-toggle-btn" id="scamToggle">▼ Cameras</button>
+      <div id="scamBody" class="scam-body">
+        <div class="scam-search-wrap">
+          <input type="text" id="scamSearch" class="cp-search" placeholder="Search cameras…" />
+        </div>
+        <div id="scamList" class="scam-list"></div>
+      </div>
+    </div>
+
   </div>
 
   <div id="map"></div>
-
-  <!-- CAMERA PANEL (right side) -->
-  <div id="camera-panel" class="camera-panel" style="display:none">
-    <div class="cp-header">
-      <span class="cp-title">Cameras</span>
-      <button class="cp-close-btn" id="cpClose">✕</button>
-    </div>
-
-    <!-- List view -->
-    <div id="cpListView" class="cp-list-view">
-      <div class="cp-search-wrap">
-        <input type="text" id="cpSearch" class="cp-search" placeholder="Search cameras…" />
-      </div>
-      <div id="cpCameraList" class="cp-camera-list"></div>
-    </div>
-
-    <!-- Detail view -->
-    <div id="cpDetailView" class="cp-detail-view" style="display:none">
-      <div class="cp-detail-header">
-        <button id="cpBackBtn" class="cp-back-btn">← Back</button>
-        <h3 id="cpDetailName"></h3>
-      </div>
-      <!-- LAN: still image -->
-      <div class="cp-image-wrap" id="cpImageWrap">
-        <img id="cpDetailImage" class="cp-detail-image" alt="" />
-      </div>
-      <!-- Static export: video -->
-      <div class="cp-image-wrap" id="cpVideoWrap" style="display:none">
-        <video id="cpDetailVideo" class="cp-detail-image" playsinline muted></video>
-      </div>
-      <div id="cpDetailTimestamp" class="cp-detail-ts"></div>
-      <div class="cp-playback-row">
-        <button id="cpPlayBtn" class="btn-primary btn-sm">▶ Play</button>
-        <button id="cpStopBtn" class="btn-secondary btn-sm" style="display:none">⏹ Stop</button>
-        <div class="cp-play-bar">
-          <div class="progress-bar"><div id="cpPlayFill" class="progress-fill"></div></div>
-        </div>
-      </div>
-      <!-- Static only: seek scrubber -->
-      <div class="cp-scrub-row" id="cpScrubRow" style="display:none">
-        <input type="range" id="cpScrubBar" class="cp-scrub-bar" min="0" max="100" step="0.01" value="0" />
-      </div>
-      <div class="cp-stats-section">
-        <div class="cp-stats-heading" id="cpStatsHeading">Counts · selected window</div>
-        <div id="cpDetailStats" class="cp-stats-grid"></div>
-      </div>
-    </div>
-  </div>
 
 </div>
 
@@ -226,13 +169,11 @@
   </div>
 </div>
 
-<script src="js/data.js?v=5"></script>
-<script src="js/map.js?v=5"></script>
-<script src="js/heatmap.js?v=5"></script>
-<script src="js/animation.js?v=5"></script>
-<script src="js/cameras.js?v=5"></script>
-<script src="js/settings.js?v=5"></script>
-<script src="js/realtime.js?v=5"></script>
-<script src="js/app.js?v=5"></script>
+<script src="js/data.js?v=6"></script>
+<script src="js/map.js?v=6"></script>
+<script src="js/cameras.js?v=6"></script>
+<script src="js/settings.js?v=6"></script>
+<script src="js/realtime.js?v=6"></script>
+<script src="js/app.js?v=6"></script>
 </body>
 </html>
