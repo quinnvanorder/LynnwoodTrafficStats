@@ -2,18 +2,38 @@
 
 (async () => {
   // ── View switching ──────────────────────────────────────────────────────────
-  let currentView = 'map';
   const views = document.querySelectorAll('.view');
-  const navBtns = document.querySelectorAll('.nav-btn');
+  const navBtns = document.querySelectorAll('.nav-btn[data-view]');
 
   function showView(name) {
-    currentView = name;
     views.forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
     navBtns.forEach(b => b.classList.toggle('active', b.dataset.view === name));
     if (name === 'settings') SettingsManager.init();
+    if (name !== 'map') CameraPanel.hide();
   }
 
   navBtns.forEach(btn => btn.addEventListener('click', () => showView(btn.dataset.view)));
+
+  // ── Cameras panel toggle ────────────────────────────────────────────────────
+  const btnCameras = document.getElementById('btnCameras');
+  btnCameras.addEventListener('click', () => {
+    showView('map');
+    const open = CameraPanel.toggle();
+    btnCameras.classList.toggle('active', open);
+    MapManager.getMap().invalidateSize();
+  });
+
+  // ── Camera panel init ───────────────────────────────────────────────────────
+  CameraPanel.init(cam => {
+    MapManager.highlightCamera(cam);
+  });
+
+  // ── Map click → open camera panel detail ────────────────────────────────────
+  MapManager.onCameraClick(cam => {
+    CameraPanel.selectCamera(cam);
+    btnCameras.classList.add('active');
+    MapManager.getMap().invalidateSize();
+  });
 
   // ── Map init ────────────────────────────────────────────────────────────────
   const leafletMap = MapManager.init();
@@ -27,10 +47,12 @@
     const stats = await Data.getStats(currentWindow);
     MapManager.updatePins(stats);
     HeatmapManager.updateData(stats);
+    CameraPanel.updateStats(stats);
   }
 
   timeWindow.addEventListener('change', () => {
     currentWindow = timeWindow.value;
+    CameraPanel.setTimeWindow(currentWindow);
     refreshStats();
   });
 
@@ -58,13 +80,10 @@
     const dur = parseInt(animDuration.value, 10);
     const count = await AnimationManager.load(currentWindow, dur);
     if (count === 0) { alert('No data for selected time window'); return; }
-
     btnPlay.style.display = 'none';
     btnStop.style.display = '';
     animProgress.style.display = 'flex';
-
     const allCameras = MapManager.getStats();
-
     AnimationManager.play(
       allCameras,
       ({ stats, progress, timestamp }) => {
@@ -93,11 +112,10 @@
 
   // ── Realtime ────────────────────────────────────────────────────────────────
   RealtimeManager.init(() => {
-    // On new snapshot event, refresh stats if not animating
     if (!AnimationManager.isPlaying()) refreshStats();
   });
 
-  // ── CSV link: hide in static build ─────────────────────────────────────────
+  // ── CSV link ─────────────────────────────────────────────────────────────────
   Data.isStatic().then(isStatic => {
     const csvLink = document.getElementById('csvLink');
     if (isStatic) {
@@ -107,5 +125,6 @@
   });
 
   // ── Initial load ─────────────────────────────────────────────────────────────
+  CameraPanel.setTimeWindow(currentWindow);
   await refreshStats();
 })();

@@ -1,88 +1,86 @@
-// leaflet.heat layer management — one layer per category, each with its own color
+// Circle-based heatmap — one L.circle per camera per enabled category.
+// Concentric radii distinguish categories; fillOpacity scales with count/max.
 
-const CATEGORY_COLORS = {
-  car_count:        { r: 239, g: 68,  b: 68  },  // red
-  truck_count:      { r: 249, g: 115, b: 22  },  // orange
-  bus_count:        { r: 234, g: 179, b: 8   },  // yellow
-  motorcycle_count: { r: 168, g: 85,  b: 247 },  // purple
-  person_count:     { r: 34,  g: 197, b: 94  },  // green
-  bicycle_count:    { r: 59,  g: 130, b: 246 },  // blue
+const CATEGORY_CONFIG = {
+  car_count:        { color: '#ef4444', radius: 340 },
+  truck_count:      { color: '#f97316', radius: 290 },
+  bus_count:        { color: '#eab308', radius: 240 },
+  motorcycle_count: { color: '#a855f7', radius: 190 },
+  person_count:     { color: '#22c55e', radius: 140 },
+  bicycle_count:    { color: '#3b82f6', radius: 90  },
 };
 
 const HeatmapManager = (() => {
-  let layers = {};  // category → L.heatLayer
+  let _map = null;
+  // circles[cat][cameraId] = L.circle
+  const circles = Object.fromEntries(Object.keys(CATEGORY_CONFIG).map(k => [k, {}]));
   let currentStats = [];
   let enabledCategories = new Set(['car_count', 'truck_count']);
 
-  function _gradient(color) {
-    // leaflet.heat uses a gradient object: { 0.0: transparent → 1.0: color }
-    const { r, g, b } = color;
-    return {
-      0.0: `rgba(${r},${g},${b},0)`,
-      0.4: `rgba(${r},${g},${b},0.3)`,
-      0.7: `rgba(${r},${g},${b},0.6)`,
-      1.0: `rgba(${r},${g},${b},1)`,
-    };
-  }
-
-  function _maxForCategory(cat) {
-    const vals = currentStats.map(c => c[cat] || 0);
-    return Math.max(...vals, 1);
-  }
-
-  function _buildPoints(cat) {
-    const max = _maxForCategory(cat);
-    return currentStats
-      .filter(c => c.lat && c.lon && c[cat] > 0)
-      .map(c => [c.lat, c.lon, c[cat] / max]);
-  }
-
   function init(map) {
-    for (const [cat, color] of Object.entries(CATEGORY_COLORS)) {
-      layers[cat] = L.heatLayer([], {
-        radius: 40,
-        blur: 30,
-        maxZoom: 17,
-        gradient: _gradient(color),
-      });
-      if (enabledCategories.has(cat)) layers[cat].addTo(map);
+    _map = map;
+  }
+
+  function _maxFor(stats, cat) {
+    return Math.max(...stats.map(c => c[cat] || 0), 1);
+  }
+
+  function _refresh(stats) {
+    const incomingIds = new Set(stats.map(c => String(c.id)));
+
+    for (const [cat, cfg] of Object.entries(CATEGORY_CONFIG)) {
+      const enabled = enabledCategories.has(cat);
+      const max = _maxFor(stats, cat);
+
+      // Remove circles for cameras no longer in stats
+      for (const id of Object.keys(circles[cat])) {
+        if (!incomingIds.has(id)) { circles[cat][id].remove(); delete circles[cat][id]; }
+      }
+
+      for (const cam of stats) {
+        if (!cam.lat || !cam.lon) continue;
+        const id = String(cam.id);
+        const count = cam[cat] || 0;
+
+        if (!enabled || count === 0) {
+          if (circles[cat][id]) { circles[cat][id].remove(); delete circles[cat][id]; }
+          continue;
+        }
+
+        const fillOpacity = 0.15 + 0.5 * (count / max);
+
+        if (circles[cat][id]) {
+          circles[cat][id].setStyle({ fillOpacity });
+        } else {
+          circles[cat][id] = L.circle([cam.lat, cam.lon], {
+            radius: cfg.radius,
+            fillColor: cfg.color,
+            fillOpacity,
+            stroke: false,
+            interactive: false,
+          }).addTo(_map);
+        }
+      }
     }
   }
 
   function updateData(stats) {
     currentStats = stats;
-    _refresh();
-  }
-
-  function _refresh() {
-    for (const [cat, layer] of Object.entries(layers)) {
-      if (enabledCategories.has(cat)) {
-        layer.setLatLngs(_buildPoints(cat));
-      } else {
-        layer.setLatLngs([]);
-      }
-    }
+    _refresh(stats);
   }
 
   function setEnabled(cat, enabled) {
-    if (enabled) {
-      enabledCategories.add(cat);
-    } else {
-      enabledCategories.delete(cat);
-    }
-    _refresh();
+    if (enabled) enabledCategories.add(cat);
+    else enabledCategories.delete(cat);
+    _refresh(currentStats);
   }
 
   function setStatsForFrame(frameStats) {
-    // Used during animation — same as updateData but without persisting
-    const saved = currentStats;
-    currentStats = frameStats;
-    _refresh();
-    currentStats = saved;
+    _refresh(frameStats);
   }
 
   function restoreCurrentStats() {
-    _refresh();
+    _refresh(currentStats);
   }
 
   return { init, updateData, setEnabled, setStatsForFrame, restoreCurrentStats };

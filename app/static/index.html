@@ -7,7 +7,6 @@
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 
   <link rel="stylesheet" href="css/main.css" />
 </head>
@@ -17,6 +16,7 @@
   <span class="brand">🚦 Lynnwood Traffic Stats</span>
   <div class="nav-links">
     <button class="nav-btn active" data-view="map">Map</button>
+    <button class="nav-btn" id="btnCameras">Cameras</button>
     <button class="nav-btn" data-view="settings">Settings</button>
   </div>
   <span class="status-dot" id="statusDot" title="Connecting…"></span>
@@ -90,6 +90,46 @@
   </div>
 
   <div id="map"></div>
+
+  <!-- CAMERA PANEL (right side) -->
+  <div id="camera-panel" class="camera-panel" style="display:none">
+    <div class="cp-header">
+      <span class="cp-title">Cameras</span>
+      <button class="cp-close-btn" id="cpClose">✕</button>
+    </div>
+
+    <!-- List view -->
+    <div id="cpListView" class="cp-list-view">
+      <div class="cp-search-wrap">
+        <input type="text" id="cpSearch" class="cp-search" placeholder="Search cameras…" />
+      </div>
+      <div id="cpCameraList" class="cp-camera-list"></div>
+    </div>
+
+    <!-- Detail view -->
+    <div id="cpDetailView" class="cp-detail-view" style="display:none">
+      <div class="cp-detail-header">
+        <button id="cpBackBtn" class="cp-back-btn">← Back</button>
+        <h3 id="cpDetailName"></h3>
+      </div>
+      <div class="cp-image-wrap">
+        <img id="cpDetailImage" class="cp-detail-image" alt="" />
+      </div>
+      <div id="cpDetailTimestamp" class="cp-detail-ts"></div>
+      <div class="cp-playback-row">
+        <button id="cpPlayBtn" class="btn-primary btn-sm">▶ Play</button>
+        <button id="cpStopBtn" class="btn-secondary btn-sm" style="display:none">⏹ Stop</button>
+        <div class="cp-play-bar">
+          <div class="progress-bar"><div id="cpPlayFill" class="progress-fill"></div></div>
+        </div>
+      </div>
+      <div class="cp-stats-section">
+        <div class="cp-stats-heading">Counts · selected window</div>
+        <div id="cpDetailStats" class="cp-stats-grid"></div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- SETTINGS VIEW -->
@@ -178,6 +218,7 @@
 <script src="js/map.js"></script>
 <script src="js/heatmap.js"></script>
 <script src="js/animation.js"></script>
+<script src="js/cameras.js"></script>
 <script src="js/settings.js"></script>
 <script src="js/realtime.js"></script>
 <script src="js/app.js"></script>

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -51,6 +52,11 @@ app.include_router(snapshots_api.router)
 app.include_router(settings_api.router)
 app.include_router(events.router)
 app.include_router(export.router)
+
+# Serve camera snapshot images
+_images_dir = Path(os.environ.get("DATA_DIR", "/data")) / "images"
+_images_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/data/images", StaticFiles(directory=str(_images_dir)), name="snapshots")
 
 # Serve static files last so API routes take priority
 static_dir = Path(__file__).parent / "static"
