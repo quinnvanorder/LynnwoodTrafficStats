@@ -4,6 +4,11 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_WARN_SCRIPT_LOCATION=1 \
     PIP_ROOT_USER_ACTION=ignore
 
+# libgl1 is required by opencv-python (pulled in by ultralytics) for cv2 to import
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0t64 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /build
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
@@ -21,13 +26,13 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_WARN_SCRIPT_LOCATION=1 \
     PIP_ROOT_USER_ACTION=ignore
 
-# Install chromium runtime deps manually — playwright install-deps uses Ubuntu package names
-# that don't exist on Debian trixie. These are the correct Debian equivalents.
 RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
     gosu \
     netcat-openbsd \
     git \
     openssh-client \
+    libgl1 \
+    libglib2.0-0t64 \
     libnss3 \
     libnspr4 \
     libatk1.0-0t64 \
@@ -49,10 +54,10 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
     fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy installed Python packages (includes playwright)
+# Copy installed Python packages
 COPY --from=builder /install /usr/local
 
-# Install chromium browser directly — system deps already installed above, skip --with-deps
+# Install chromium browser — system deps already installed above
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN playwright install chromium && chmod -R a+rX /ms-playwright
 
