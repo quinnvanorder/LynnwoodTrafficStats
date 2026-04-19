@@ -12,6 +12,7 @@ DEFAULTS = {
     "git_remote_branch": "main",
     "detection_model": "yolov8n.pt",
     "detection_confidence_threshold": 0.4,
+    "detection_imgsz": 800,
 }
 
 

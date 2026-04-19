@@ -68,6 +68,7 @@ def detect(
     image: Image.Image,
     model_name: str = "yolov8n.pt",
     confidence: float = 0.4,
+    imgsz: int = 640,
     exclusion_zones: list | None = None,
 ) -> tuple[dict, Image.Image]:
     """Run detection on a PIL image. Returns (count dict, annotated image)."""
@@ -75,7 +76,7 @@ def detect(
         image = apply_exclusion_zones(image, exclusion_zones)
     model = _get_model(model_name)
     img_array = np.array(image)
-    results = model(img_array, conf=confidence, verbose=False)
+    results = model(img_array, conf=confidence, imgsz=imgsz, verbose=False)
 
     counts = {v: 0 for v in WANTED_CLASSES.values()}
     for result in results:

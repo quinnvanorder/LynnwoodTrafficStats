@@ -2,28 +2,87 @@
 
 const SettingsManager = (() => {
   let _initialized = false;
+  let _pollIntervalId = null;
+
+  // Fields that live in the settings form (detection_model is handled by the dropdown separately)
+  const FORM_FIELDS = [
+    'snapshot_interval_seconds', 'image_retention_count',
+    'static_export_interval_seconds', 'git_repo_url', 'git_remote_branch',
+    'detection_confidence_threshold', 'detection_imgsz',
+  ];
 
   async function load() {
     const cfg = await Data.loadSettings();
     const form = document.getElementById('settingsForm');
-    for (const [key, val] of Object.entries(cfg)) {
+    for (const key of FORM_FIELDS) {
       const el = form.elements[key];
-      if (el) el.value = val;
+      if (el) el.value = cfg[key] ?? '';
     }
+    // Sync model dropdown to current model in settings
+    const modelSelect = document.getElementById('modelSelect');
+    if (modelSelect && cfg.detection_model) {
+      // Try to match exact value; if not found leave as-is
+      if ([...modelSelect.options].some(o => o.value === cfg.detection_model)) {
+        modelSelect.value = cfg.detection_model;
+      }
+    }
+    // Resume backfill display if a job is in progress or recently finished
+    _checkBackfillStatus();
+  }
+
+  async function _checkBackfillStatus() {
+    try {
+      const s = await fetch('/api/settings/backfill-status').then(r => r.json());
+      const statusEl = document.getElementById('backfillStatus');
+      if (!statusEl) return;
+      if (s.running) {
+        statusEl.style.display = '';
+        statusEl.textContent = `Backfill: ${s.done} / ${s.total} snapshots reprocessed`;
+        if (!_pollIntervalId) _startPoll(statusEl);
+      } else if (s.total > 0) {
+        statusEl.style.display = '';
+        statusEl.textContent = `Last backfill: ${s.total} snapshots reprocessed`;
+      }
+    } catch { /* server may not have run a backfill yet */ }
+  }
+
+  function _startPoll(statusEl) {
+    if (_pollIntervalId) clearInterval(_pollIntervalId);
+    _pollIntervalId = setInterval(async () => {
+      try {
+        const s = await fetch('/api/settings/backfill-status').then(r => r.json());
+        if (s.total > 0) {
+          statusEl.textContent = `Backfill: ${s.done} / ${s.total} snapshots reprocessed`;
+        }
+        if (!s.running) {
+          clearInterval(_pollIntervalId);
+          _pollIntervalId = null;
+          statusEl.textContent = `Backfill complete — ${s.total} snapshots reprocessed`;
+          setTimeout(() => { if (statusEl.textContent.startsWith('Backfill complete')) statusEl.style.display = 'none'; }, 8000);
+        }
+      } catch {
+        clearInterval(_pollIntervalId);
+        _pollIntervalId = null;
+      }
+    }, 3000);
   }
 
   function init() {
-    if (_initialized) { load(); return; }
-    _initialized = true;
+    if (!_initialized) {
+      _initialized = true;
+      _attachListeners();
+    }
+    load();
+  }
 
+  function _attachListeners() {
     document.getElementById('settingsForm').addEventListener('submit', async e => {
       e.preventDefault();
       const form = e.target;
       const data = {};
-      for (const el of form.elements) {
-        if (el.name) {
-          data[el.name] = el.type === 'number' ? Number(el.value) : el.value;
-        }
+      for (const key of FORM_FIELDS) {
+        const el = form.elements[key];
+        if (el) data[key] = el.type === 'number' ? Number(el.value) : el.value;
       }
       await Data.saveSettings(data);
       _toast('Settings saved');
@@ -31,8 +90,7 @@ const SettingsManager = (() => {
 
     document.getElementById('btnGenerateKey').addEventListener('click', async () => {
       const btn = document.getElementById('btnGenerateKey');
-      btn.disabled = true;
-      btn.textContent = 'Generating…';
+      btn.disabled = true; btn.textContent = 'Generating…';
       try {
         const res = await Data.generateDeployKey();
         const display = document.getElementById('publicKeyDisplay');
@@ -42,30 +100,31 @@ const SettingsManager = (() => {
       } catch (err) {
         _toast('Key generation failed: ' + err.message, true);
       } finally {
-        btn.disabled = false;
-        btn.textContent = 'Generate Deploy Key';
+        btn.disabled = false; btn.textContent = 'Generate Deploy Key';
       }
     });
 
-    // Model switch
     document.getElementById('btnSwitchModel').addEventListener('click', async () => {
       const select = document.getElementById('modelSelect');
       const model = select.value;
-      const status = document.getElementById('backfillStatus');
-      if (!confirm(`Switch to ${model}? This will delete all annotated images and reprocess every snapshot — may take a while.`)) return;
-      status.textContent = 'Switching model and queuing backfill…';
-      status.style.display = '';
+      const statusEl = document.getElementById('backfillStatus');
+      if (!confirm(`Switch to ${model}?\n\nThis will delete all annotated images and reprocess every snapshot with the new model. Counts in the DB will be updated. This runs in the background.`)) return;
+
+      statusEl.textContent = 'Switching model and starting backfill…';
+      statusEl.style.display = '';
+      if (_pollIntervalId) { clearInterval(_pollIntervalId); _pollIntervalId = null; }
+
       try {
         await fetch('/api/settings/switch-model', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ model }),
         });
-        _toast(`Switched to ${model} — backfill running in background`);
-        _pollBackfill(status);
-      } catch (e) {
+        _toast(`Switched to ${model} — backfill queued`);
+        _startPoll(statusEl);
+      } catch {
         _toast('Model switch failed', true);
-        status.style.display = 'none';
+        statusEl.style.display = 'none';
       }
     });
 
@@ -127,22 +186,6 @@ const SettingsManager = (() => {
       body: JSON.stringify({ active: !!active }),
     });
     await renderCameraList();
-  }
-
-  function _pollBackfill(statusEl) {
-    const interval = setInterval(async () => {
-      try {
-        const s = await fetch('/api/settings/backfill-status').then(r => r.json());
-        if (s.total > 0) {
-          statusEl.textContent = `Backfill: ${s.done} / ${s.total} snapshots reprocessed`;
-        }
-        if (!s.running) {
-          clearInterval(interval);
-          statusEl.textContent = `Backfill complete — ${s.total} snapshots reprocessed`;
-          setTimeout(() => { statusEl.style.display = 'none'; }, 5000);
-        }
-      } catch { clearInterval(interval); }
-    }, 3000);
   }
 
   function _toast(msg, isError = false) {

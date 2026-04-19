@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <link rel="stylesheet" href="css/main.css?v=7" />
+  <link rel="stylesheet" href="css/main.css?v=8" />
 </head>
 <body>
 
@@ -114,13 +114,14 @@
         <input type="text" name="git_remote_branch" />
       </div>
       <div class="setting-group">
-        <label>Detection Model</label>
-        <input type="text" name="detection_model" />
-        <span class="hint">Used for new snapshots. To switch and reprocess all history, use the switcher below.</span>
+        <label>Detection Confidence Threshold</label>
+        <input type="number" name="detection_confidence_threshold" min="0.05" max="1" step="0.05" />
+        <span class="hint">Lower values (0.2–0.3) catch more distant vehicles but may add false positives. Default 0.4.</span>
       </div>
       <div class="setting-group">
-        <label>Detection Confidence Threshold</label>
-        <input type="number" name="detection_confidence_threshold" min="0.1" max="1" step="0.05" />
+        <label>Detection Input Size (px)</label>
+        <input type="number" name="detection_imgsz" min="320" max="1920" step="32" />
+        <span class="hint">Should match your camera's native width (rounded to a multiple of 32). Lynnwood cameras deliver 800px wide — so 800 is the right default. Going lower throws away real detail; going higher only interpolates pixels that aren't there. If you have 1080p cameras use 1088.</span>
       </div>
       <button type="submit" class="btn-primary">Save Settings</button>
     </form>
@@ -134,16 +135,26 @@
 
     <hr />
 
-    <h3>Switch Detection Model</h3>
-    <p class="hint">Switching deletes all annotated images and reprocesses every snapshot with the new model. Historical counts are updated. This runs in the background and may take a while.</p>
+    <h3>Detection Model</h3>
+    <p class="hint">Switching models deletes annotated images and reprocesses every snapshot in the background — counts are updated. For traffic cameras, <strong>increasing Input Size to 1280</strong> is often more impactful than switching models, since it helps detect distant/small vehicles.</p>
     <div class="model-switch-row">
       <select id="modelSelect">
-        <option value="yolov8n.pt">YOLOv8 Nano (fastest, current default)</option>
-        <option value="yolo11n.pt">YOLO11 Nano (faster than v8n, better accuracy)</option>
-        <option value="yolov8s.pt">YOLOv8 Small (good balance)</option>
-        <option value="yolo11s.pt" selected>YOLO11 Small (recommended — best balance)</option>
-        <option value="yolov8m.pt">YOLOv8 Medium (high accuracy, slower)</option>
-        <option value="yolo11m.pt">YOLO11 Medium (highest practical accuracy)</option>
+        <optgroup label="YOLO11 (recommended — newer, more efficient)">
+          <option value="yolo11n.pt">YOLO11 Nano — fastest</option>
+          <option value="yolo11s.pt" selected>YOLO11 Small — best balance for NAS</option>
+          <option value="yolo11m.pt">YOLO11 Medium — high accuracy</option>
+          <option value="yolo11l.pt">YOLO11 Large — very accurate, slow on CPU</option>
+        </optgroup>
+        <optgroup label="YOLOv8 (proven, widely used)">
+          <option value="yolov8n.pt">YOLOv8 Nano — fastest</option>
+          <option value="yolov8s.pt">YOLOv8 Small</option>
+          <option value="yolov8m.pt">YOLOv8 Medium</option>
+          <option value="yolov8l.pt">YOLOv8 Large</option>
+        </optgroup>
+        <optgroup label="RT-DETR (transformer — best at small/occluded objects)">
+          <option value="rtdetr-l.pt">RT-DETR Large — excellent, GPU recommended</option>
+          <option value="rtdetr-x.pt">RT-DETR X-Large — highest accuracy</option>
+        </optgroup>
       </select>
       <button id="btnSwitchModel" class="btn-primary">Switch &amp; Reprocess</button>
     </div>
@@ -187,11 +198,11 @@
   </div>
 </div>
 
-<script src="js/data.js?v=7"></script>
-<script src="js/map.js?v=7"></script>
-<script src="js/cameras.js?v=7"></script>
-<script src="js/settings.js?v=7"></script>
-<script src="js/realtime.js?v=7"></script>
-<script src="js/app.js?v=7"></script>
+<script src="js/data.js?v=8"></script>
+<script src="js/map.js?v=8"></script>
+<script src="js/cameras.js?v=8"></script>
+<script src="js/settings.js?v=8"></script>
+<script src="js/realtime.js?v=8"></script>
+<script src="js/app.js?v=8"></script>
 </body>
 </html>
