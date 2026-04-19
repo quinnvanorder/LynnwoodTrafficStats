@@ -1,0 +1,34 @@
+import json
+import os
+from pathlib import Path
+
+CONFIG_PATH = Path(os.environ.get("CONFIG_DIR", "/config")) / "settings.json"
+
+DEFAULTS = {
+    "snapshot_interval_seconds": 300,
+    "image_retention_count": 1000,
+    "static_export_interval_seconds": 600,
+    "git_repo_url": "",
+    "git_remote_branch": "main",
+    "detection_model": "yolov8n.pt",
+    "detection_confidence_threshold": 0.4,
+}
+
+
+def load() -> dict:
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH) as f:
+            data = json.load(f)
+        return {**DEFAULTS, **data}
+    return dict(DEFAULTS)
+
+
+def save(settings: dict) -> None:
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    merged = {**DEFAULTS, **settings}
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(merged, f, indent=2)
+
+
+def get(key: str):
+    return load().get(key, DEFAULTS.get(key))

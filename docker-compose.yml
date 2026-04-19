@@ -1,0 +1,23 @@
+services:
+  lynnwoodtraffic:
+    build: .
+    image: lynnwoodtraffic:latest
+    container_name: lynnwoodtraffic
+    restart: on-failure:5
+    ports:
+      - "6970:8000"
+    volumes:
+      - /volume1/docker/lynnwoodtraffic/config:/config:rw
+      - /volume1/docker/lynnwoodtraffic/data:/data:rw
+    environment:
+      TZ: America/Los_Angeles
+      PUID: 1029
+      PGID: 100
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:unconfined
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

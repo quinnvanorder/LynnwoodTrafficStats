@@ -1,0 +1,10 @@
+/dev
+/.claude
+
+# Runtime data (populated by Docker volumes)
+/data/
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.pt
