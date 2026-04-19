@@ -4,10 +4,8 @@ WORKDIR /build
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-# Install playwright + chromium into a fixed path accessible by any user
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN pip install --no-cache-dir playwright && \
-    playwright install chromium --with-deps
+# Install playwright (browser download happens in runtime stage)
+RUN pip install --no-cache-dir playwright
 
 # Pre-download YOLOv8 nano weights — ultralytics saves to WORKDIR (/build/yolov8n.pt)
 RUN PYTHONPATH=/install/lib/python3.12/site-packages python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
@@ -43,13 +41,12 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-ins
     fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy playwright browsers to the same fixed path, readable by all users
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-COPY --from=builder /ms-playwright /ms-playwright
-RUN chmod -R a+rX /ms-playwright
-
-# Copy installed Python packages
+# Copy installed Python packages (includes playwright)
 COPY --from=builder /install /usr/local
+
+# Install chromium browser directly — system deps already installed above, skip --with-deps
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN playwright install chromium && chmod -R a+rX /ms-playwright
 
 WORKDIR /app
 COPY . .
