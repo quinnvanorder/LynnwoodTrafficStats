@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir playwright && \
     playwright install chromium --with-deps
 
 # Pre-download YOLOv8 nano weights — ultralytics saves to WORKDIR (/build/yolov8n.pt)
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+RUN PYTHONPATH=/install/lib/python3.12/site-packages python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
 
 FROM python:3.12-slim
