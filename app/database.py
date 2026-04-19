@@ -161,7 +161,7 @@ def get_snapshots(camera_id: int | None = None, start: str | None = None,
 
 def get_stats(start: str | None = None, end: str | None = None) -> list[dict]:
     """Aggregate counts per camera for the given time window."""
-    join_cond = " AND s.camera_id = c.id"
+    join_cond = "s.camera_id = c.id"
     params = []
     if start:
         join_cond += " AND s.captured_at >= ?"
@@ -183,7 +183,7 @@ def get_stats(start: str | None = None, end: str | None = None) -> list[dict]:
                 COALESCE(SUM(s.total_count), 0)      AS total_count,
                 COUNT(s.id)                          AS snapshot_count
             FROM cameras c
-            LEFT JOIN snapshots s ON{join_cond}
+            LEFT JOIN snapshots s ON {join_cond}
             GROUP BY c.id
             ORDER BY c.address
         """, params).fetchall()
