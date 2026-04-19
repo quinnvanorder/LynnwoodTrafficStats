@@ -1,6 +1,8 @@
 // Settings page logic
 
 const SettingsManager = (() => {
+  let _initialized = false;
+
   async function load() {
     const cfg = await Data.loadSettings();
     const form = document.getElementById('settingsForm');
@@ -11,6 +13,9 @@ const SettingsManager = (() => {
   }
 
   function init() {
+    if (_initialized) { load(); return; }
+    _initialized = true;
+
     document.getElementById('settingsForm').addEventListener('submit', async e => {
       e.preventDefault();
       const form = e.target;
@@ -39,6 +44,28 @@ const SettingsManager = (() => {
       } finally {
         btn.disabled = false;
         btn.textContent = 'Generate Deploy Key';
+      }
+    });
+
+    // Model switch
+    document.getElementById('btnSwitchModel').addEventListener('click', async () => {
+      const select = document.getElementById('modelSelect');
+      const model = select.value;
+      const status = document.getElementById('backfillStatus');
+      if (!confirm(`Switch to ${model}? This will delete all annotated images and reprocess every snapshot — may take a while.`)) return;
+      status.textContent = 'Switching model and queuing backfill…';
+      status.style.display = '';
+      try {
+        await fetch('/api/settings/switch-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model }),
+        });
+        _toast(`Switched to ${model} — backfill running in background`);
+        _pollBackfill(status);
+      } catch (e) {
+        _toast('Model switch failed', true);
+        status.style.display = 'none';
       }
     });
 
@@ -100,6 +127,22 @@ const SettingsManager = (() => {
       body: JSON.stringify({ active: !!active }),
     });
     await renderCameraList();
+  }
+
+  function _pollBackfill(statusEl) {
+    const interval = setInterval(async () => {
+      try {
+        const s = await fetch('/api/settings/backfill-status').then(r => r.json());
+        if (s.total > 0) {
+          statusEl.textContent = `Backfill: ${s.done} / ${s.total} snapshots reprocessed`;
+        }
+        if (!s.running) {
+          clearInterval(interval);
+          statusEl.textContent = `Backfill complete — ${s.total} snapshots reprocessed`;
+          setTimeout(() => { statusEl.style.display = 'none'; }, 5000);
+        }
+      } catch { clearInterval(interval); }
+    }, 3000);
   }
 
   function _toast(msg, isError = false) {

@@ -60,11 +60,15 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_snapshots_camera_time
                 ON snapshots (camera_id, captured_at);
         """)
-        # Migration: add annotated_path if DB predates it
-        try:
-            db.execute("ALTER TABLE snapshots ADD COLUMN annotated_path TEXT")
-        except Exception:
-            pass
+        # Migrations
+        for stmt in [
+            "ALTER TABLE snapshots ADD COLUMN annotated_path TEXT",
+            "ALTER TABLE cameras ADD COLUMN exclusion_zones TEXT",
+        ]:
+            try:
+                db.execute(stmt)
+            except Exception:
+                pass
 
 
 # ── cameras ──────────────────────────────────────────────────────────────────
@@ -101,6 +105,22 @@ def set_camera_active(camera_id: int, active: bool) -> None:
 def delete_camera(camera_id: int) -> None:
     with get_db() as db:
         db.execute("DELETE FROM cameras WHERE id = ? AND is_custom = 1", (camera_id,))
+
+
+def get_camera_zones(camera_id: int) -> list:
+    import json
+    with get_db() as db:
+        row = db.execute("SELECT exclusion_zones FROM cameras WHERE id = ?", (camera_id,)).fetchone()
+        if row and row["exclusion_zones"]:
+            return json.loads(row["exclusion_zones"])
+        return []
+
+
+def set_camera_zones(camera_id: int, zones: list) -> None:
+    import json
+    with get_db() as db:
+        db.execute("UPDATE cameras SET exclusion_zones = ? WHERE id = ?",
+                   (json.dumps(zones), camera_id))
 
 
 def deactivate_missing_cameras(known_urls: list[str]) -> None:
@@ -251,6 +271,58 @@ def prune_images(camera_id: int, retention_count: int) -> list[str]:
                 f" WHERE id IN ({','.join('?'*len(ids))})",
                 ids,
             )
+        return paths
+
+
+def get_snapshots_for_backfill(camera_id: int | None = None) -> list[dict]:
+    """All snapshots with an image_path, for backfill reprocessing."""
+    conditions = ["image_path IS NOT NULL"]
+    params: list = []
+    if camera_id is not None:
+        conditions.append("camera_id = ?")
+        params.append(camera_id)
+    where = "WHERE " + " AND ".join(conditions)
+    with get_db() as db:
+        rows = db.execute(
+            f"SELECT id, camera_id, image_path, captured_at FROM snapshots {where} ORDER BY captured_at",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_snapshot_analysis(snap_id: int, counts: dict, annotated_path: str | None) -> None:
+    total = sum(counts.get(k, 0) for k in
+                ("person_count", "bicycle_count", "motorcycle_count",
+                 "car_count", "bus_count", "truck_count"))
+    with get_db() as db:
+        db.execute("""
+            UPDATE snapshots SET
+                annotated_path   = ?,
+                person_count     = ?,
+                bicycle_count    = ?,
+                motorcycle_count = ?,
+                car_count        = ?,
+                bus_count        = ?,
+                truck_count      = ?,
+                total_count      = ?
+            WHERE id = ?
+        """, (
+            annotated_path,
+            counts.get("person_count", 0), counts.get("bicycle_count", 0),
+            counts.get("motorcycle_count", 0), counts.get("car_count", 0),
+            counts.get("bus_count", 0), counts.get("truck_count", 0),
+            total, snap_id,
+        ))
+
+
+def clear_annotated_paths() -> list[str]:
+    """Null all annotated_path values and return the paths so callers can delete the files."""
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT annotated_path FROM snapshots WHERE annotated_path IS NOT NULL"
+        ).fetchall()
+        paths = [r["annotated_path"] for r in rows]
+        db.execute("UPDATE snapshots SET annotated_path = NULL")
         return paths
 
 

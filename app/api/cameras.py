@@ -16,6 +16,7 @@ class CameraCreate(BaseModel):
 class CameraUpdate(BaseModel):
     active: bool | None = None
     address: str | None = None
+    exclusion_zones: list | None = None
 
 
 @router.get("")
@@ -37,6 +38,8 @@ def update_camera(camera_id: int, body: CameraUpdate):
         raise HTTPException(404, "Camera not found")
     if body.active is not None:
         database.set_camera_active(camera_id, body.active)
+    if body.exclusion_zones is not None:
+        database.set_camera_zones(camera_id, body.exclusion_zones)
     return {"ok": True}
 
 

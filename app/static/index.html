@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <link rel="stylesheet" href="css/main.css?v=6" />
+  <link rel="stylesheet" href="css/main.css?v=7" />
 </head>
 <body>
 
@@ -116,6 +116,7 @@
       <div class="setting-group">
         <label>Detection Model</label>
         <input type="text" name="detection_model" />
+        <span class="hint">Used for new snapshots. To switch and reprocess all history, use the switcher below.</span>
       </div>
       <div class="setting-group">
         <label>Detection Confidence Threshold</label>
@@ -130,6 +131,23 @@
     <p class="hint">Generate an ed25519 key pair. Copy the public key below and add it as a deploy key on your GitHub repo.</p>
     <button id="btnGenerateKey" class="btn-secondary">Generate Deploy Key</button>
     <pre id="publicKeyDisplay" style="display:none"></pre>
+
+    <hr />
+
+    <h3>Switch Detection Model</h3>
+    <p class="hint">Switching deletes all annotated images and reprocesses every snapshot with the new model. Historical counts are updated. This runs in the background and may take a while.</p>
+    <div class="model-switch-row">
+      <select id="modelSelect">
+        <option value="yolov8n.pt">YOLOv8 Nano (fastest, current default)</option>
+        <option value="yolo11n.pt">YOLO11 Nano (faster than v8n, better accuracy)</option>
+        <option value="yolov8s.pt">YOLOv8 Small (good balance)</option>
+        <option value="yolo11s.pt" selected>YOLO11 Small (recommended — best balance)</option>
+        <option value="yolov8m.pt">YOLOv8 Medium (high accuracy, slower)</option>
+        <option value="yolo11m.pt">YOLO11 Medium (highest practical accuracy)</option>
+      </select>
+      <button id="btnSwitchModel" class="btn-primary">Switch &amp; Reprocess</button>
+    </div>
+    <div id="backfillStatus" class="hint" style="display:none"></div>
 
     <hr />
 
@@ -169,11 +187,11 @@
   </div>
 </div>
 
-<script src="js/data.js?v=6"></script>
-<script src="js/map.js?v=6"></script>
-<script src="js/cameras.js?v=6"></script>
-<script src="js/settings.js?v=6"></script>
-<script src="js/realtime.js?v=6"></script>
-<script src="js/app.js?v=6"></script>
+<script src="js/data.js?v=7"></script>
+<script src="js/map.js?v=7"></script>
+<script src="js/cameras.js?v=7"></script>
+<script src="js/settings.js?v=7"></script>
+<script src="js/realtime.js?v=7"></script>
+<script src="js/app.js?v=7"></script>
 </body>
 </html>

@@ -62,13 +62,13 @@
   const scamToggle = document.getElementById('scamToggle');
   const scamBody   = document.getElementById('scamBody');
   scamToggle.addEventListener('click', () => {
-    const open = scamBody.style.display === 'none' || scamBody.style.display === '';
-    scamBody.style.display = open ? 'flex' : 'none';
-    scamToggle.textContent = open ? '▲ Cameras' : '▼ Cameras';
+    const isOpen = scamBody.style.display !== 'none';
+    scamBody.style.display = isOpen ? 'none' : 'flex';
+    scamToggle.textContent = isOpen ? '▼ Cameras' : '▲ Cameras';
   });
-  // Start collapsed
-  scamBody.style.display = 'none';
-  scamToggle.textContent = '▼ Cameras';
+  // Start expanded
+  scamBody.style.display = 'flex';
+  scamToggle.textContent = '▲ Cameras';
 
   // ── Realtime ────────────────────────────────────────────────────────────────
   RealtimeManager.init(() => refreshStats());

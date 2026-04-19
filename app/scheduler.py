@@ -18,6 +18,7 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 IMAGES_DIR = DATA_DIR / "images"
 
 _scheduler: BackgroundScheduler | None = None
+_backfill_status: dict = {"running": False, "done": 0, "total": 0}
 
 
 def _fetch_hls_frame(hls_url: str) -> Image.Image | None:
@@ -112,7 +113,10 @@ def snapshot_job() -> None:
         if img is None:
             continue
 
-        counts, annotated_img = detection.detect(img, model_name=model_name, confidence=confidence)
+        zones = database.get_camera_zones(cam["id"])
+        counts, annotated_img = detection.detect(
+            img, model_name=model_name, confidence=confidence, exclusion_zones=zones
+        )
 
         captured_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -129,6 +133,50 @@ def snapshot_job() -> None:
     if results:
         sse.broadcast("snapshot", {"snapshots": results})
         logger.info("Snapshot complete: %d cameras processed", len(results))
+
+
+def backfill_job(model_name: str | None = None) -> None:
+    global _backfill_status
+    if _backfill_status["running"]:
+        logger.info("Backfill already running, skipping")
+        return
+
+    cfg = settings.load()
+    model = model_name or cfg["detection_model"]
+    confidence = cfg["detection_confidence_threshold"]
+
+    snapshots = database.get_snapshots_for_backfill()
+    _backfill_status = {"running": True, "done": 0, "total": len(snapshots)}
+    logger.info("Backfill started: %d snapshots with model=%s", len(snapshots), model)
+
+    cam_zones: dict = {}
+    for snap in snapshots:
+        cam_id = snap["camera_id"]
+        if cam_id not in cam_zones:
+            cam_zones[cam_id] = database.get_camera_zones(cam_id)
+
+        full_path = DATA_DIR / snap["image_path"]
+        if not full_path.exists():
+            _backfill_status["done"] += 1
+            continue
+        try:
+            img = Image.open(full_path).convert("RGB")
+            counts, annotated_img = detection.detect(
+                img, model_name=model, confidence=confidence,
+                exclusion_zones=cam_zones[cam_id],
+            )
+            annotated_path = _save_image(cam_id, annotated_img, snap["captured_at"], subdir="annotated")
+            database.update_snapshot_analysis(snap["id"], counts, annotated_path)
+        except Exception as e:
+            logger.warning("Backfill failed for snapshot %d: %s", snap["id"], e)
+        _backfill_status["done"] += 1
+
+    _backfill_status["running"] = False
+    logger.info("Backfill complete: %d snapshots", len(snapshots))
+
+
+def get_backfill_status() -> dict:
+    return dict(_backfill_status)
 
 
 def discovery_job() -> None:
@@ -171,6 +219,14 @@ def reschedule(snapshot_interval: int, export_interval: int) -> None:
 def trigger_snapshot() -> None:
     if _scheduler:
         _scheduler.add_job(snapshot_job, trigger="date", id="snapshot_manual", replace_existing=True)
+
+
+def trigger_backfill(model_name: str | None = None) -> None:
+    if _scheduler:
+        _scheduler.add_job(
+            backfill_job, trigger="date", id="backfill_manual",
+            replace_existing=True, kwargs={"model_name": model_name},
+        )
 
 
 def trigger_discovery() -> None:

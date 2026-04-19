@@ -50,12 +50,29 @@ def _get_model(model_name: str = "yolov8n.pt"):
     return _model
 
 
+def apply_exclusion_zones(image: Image.Image, zones: list) -> Image.Image:
+    """Black out rectangular zones before inference. Zones: [[x1,y1,x2,y2], ...] as 0.0–1.0 fractions."""
+    if not zones:
+        return image
+    from PIL import ImageDraw
+    img = image.copy()
+    draw = ImageDraw.Draw(img)
+    w, h = img.size
+    for zone in zones:
+        x1, y1, x2, y2 = zone
+        draw.rectangle([x1 * w, y1 * h, x2 * w, y2 * h], fill=(0, 0, 0))
+    return img
+
+
 def detect(
     image: Image.Image,
     model_name: str = "yolov8n.pt",
     confidence: float = 0.4,
+    exclusion_zones: list | None = None,
 ) -> tuple[dict, Image.Image]:
     """Run detection on a PIL image. Returns (count dict, annotated image)."""
+    if exclusion_zones:
+        image = apply_exclusion_zones(image, exclusion_zones)
     model = _get_model(model_name)
     img_array = np.array(image)
     results = model(img_array, conf=confidence, verbose=False)

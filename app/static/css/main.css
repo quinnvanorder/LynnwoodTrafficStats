@@ -203,3 +203,42 @@ pre#publicKeyDisplay {
 .cp-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; font-size: 11px; }
 .ds-label { color: var(--text-muted); }
 .ds-val { font-weight: 600; text-align: right; }
+
+/* ── Fullscreen overlay (sidebar cameras) ── */
+.scam-fs-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,.95);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 20px;
+}
+.scam-fs-media {
+  max-width: 100%; max-height: 75vh; object-fit: contain; display: block;
+  border-radius: 4px;
+}
+.scam-fs-controls {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;
+}
+.scam-fs-stats {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 3px 16px; font-size: 12px;
+}
+.scam-fs-close {
+  position: absolute; top: 16px; right: 20px;
+  background: rgba(255,255,255,.15); border: none; color: #fff;
+  font-size: 22px; width: 44px; height: 44px; border-radius: 50%;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background .15s;
+}
+.scam-fs-close:hover { background: rgba(255,255,255,.3); }
+
+/* ── Zone editor ── */
+.scam-zone-toolbar { display: flex; gap: 6px; flex-wrap: wrap; }
+.scam-zone-canvas { margin-top: 4px; border-radius: 4px; overflow: hidden; }
+.scam-zone-canvas canvas { display: block; }
+.scam-zone-hint { font-size: 10px; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
+
+/* ── Model switch ── */
+.model-switch-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.model-switch-row select {
+  flex: 1; min-width: 200px; background: var(--surface2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px;
+}
