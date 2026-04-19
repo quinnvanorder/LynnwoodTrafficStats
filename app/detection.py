@@ -1,4 +1,15 @@
 import os
+
+# Must be set before torch/ultralytics are ever imported.
+# NNPACK_DISABLE=1 stops PyTorch from attempting (and warning about) NNPACK on
+# hardware that doesn't support it (e.g. Synology NAS ARM/x86 without NNPACK).
+# The config-dir vars redirect matplotlib, fontconfig, and ultralytics away from
+# /home/appuser (which doesn't exist or isn't writable at runtime PUID).
+os.environ.setdefault("NNPACK_DISABLE", "1")
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
+os.environ.setdefault("YOLO_CONFIG_DIR", "/tmp")
+os.environ.setdefault("FC_CACHEDIR", "/tmp")
+
 from pathlib import Path
 
 import cv2

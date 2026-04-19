@@ -26,7 +26,11 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_WARN_SCRIPT_LOCATION=1 \
     PIP_ROOT_USER_ACTION=ignore \
     NNPACK_DISABLE=1 \
-    PYTORCH_NO_CUDA_MEMORY_CACHING=1
+    PYTORCH_NO_CUDA_MEMORY_CACHING=1 \
+    MPLCONFIGDIR=/tmp/matplotlib \
+    YOLO_CONFIG_DIR=/tmp \
+    FC_CACHEDIR=/tmp \
+    FONTCONFIG_PATH=/etc/fonts
 
 RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
     gosu \
