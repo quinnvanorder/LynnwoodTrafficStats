@@ -3,8 +3,9 @@
 const SettingsManager = (() => {
   let _initialized = false;
   let _pollIntervalId = null;
+  let _modelStatusPollId = null;
 
-  // Fields that live in the settings form (detection_model is handled by the dropdown separately)
+  // Fields managed by the settings form (detection_model is owned by the model switcher)
   const FORM_FIELDS = [
     'snapshot_interval_seconds', 'image_retention_count',
     'static_export_interval_seconds', 'git_repo_url', 'git_remote_branch',
@@ -18,70 +19,160 @@ const SettingsManager = (() => {
       const el = form.elements[key];
       if (el) el.value = cfg[key] ?? '';
     }
-    // Sync model dropdown to current model in settings
+    // Sync model dropdown to current configured model
     const modelSelect = document.getElementById('modelSelect');
     if (modelSelect && cfg.detection_model) {
-      // Try to match exact value; if not found leave as-is
       if ([...modelSelect.options].some(o => o.value === cfg.detection_model)) {
         modelSelect.value = cfg.detection_model;
       }
     }
-    // Resume backfill display if a job is in progress or recently finished
+    _refreshModelStatus();
     _checkBackfillStatus();
   }
+
+  // ── Model status ────────────────────────────────────────────────────────────
+
+  async function _refreshModelStatus() {
+    try {
+      const status = await fetch('/api/settings/model-status').then(r => r.json());
+      _applyModelStatus(status);
+    } catch { /* server may be starting up */ }
+  }
+
+  function _applyModelStatus(status) {
+    const modelSelect = document.getElementById('modelSelect');
+    const dlBtn   = document.getElementById('btnDownloadModel');
+    const swBtn   = document.getElementById('btnSwitchModel');
+    const dlStatus = document.getElementById('modelDownloadStatus');
+    if (!modelSelect) return;
+
+    // Update option text to show availability
+    for (const opt of modelSelect.options) {
+      const s = status[opt.value];
+      if (!s) continue;
+      const base = opt.dataset.label || (opt.dataset.label = opt.text.replace(/ [✓⬇⟳].*$/, '').trim());
+      if (s.downloading) {
+        opt.text = `${base} ⟳ downloading…`;
+      } else if (s.available) {
+        opt.text = `${base} ✓`;
+      } else {
+        opt.text = `${base} (not downloaded)`;
+      }
+    }
+
+    // Update buttons based on currently selected model
+    _updateModelButtons(status);
+
+    // If any model is downloading, keep polling
+    const anyDownloading = Object.values(status).some(s => s.downloading);
+    if (anyDownloading && !_modelStatusPollId) {
+      _modelStatusPollId = setInterval(async () => {
+        try {
+          const s = await fetch('/api/settings/model-status').then(r => r.json());
+          _applyModelStatus(s);
+          if (!Object.values(s).some(x => x.downloading)) {
+            clearInterval(_modelStatusPollId);
+            _modelStatusPollId = null;
+          }
+        } catch { clearInterval(_modelStatusPollId); _modelStatusPollId = null; }
+      }, 2000);
+    }
+  }
+
+  function _updateModelButtons(status) {
+    const modelSelect  = document.getElementById('modelSelect');
+    const dlBtn        = document.getElementById('btnDownloadModel');
+    const swBtn        = document.getElementById('btnSwitchModel');
+    const dlStatus     = document.getElementById('modelDownloadStatus');
+    if (!modelSelect || !dlBtn || !swBtn) return;
+
+    const selected = modelSelect.value;
+    const s = status ? status[selected] : null;
+    const available    = s?.available   ?? false;
+    const downloading  = s?.downloading ?? false;
+    const error        = s?.error;
+
+    dlBtn.style.display = available ? 'none' : '';
+    swBtn.disabled = !available;
+    swBtn.title = available ? '' : 'Download the model first';
+
+    if (downloading) {
+      dlBtn.disabled = true;
+      dlBtn.textContent = '⟳ Downloading…';
+    } else {
+      dlBtn.disabled = false;
+      dlBtn.textContent = '⬇ Download';
+    }
+
+    if (dlStatus) {
+      if (error) {
+        dlStatus.textContent = `Download failed: ${error}`;
+        dlStatus.style.display = '';
+      } else if (!available && !downloading) {
+        dlStatus.textContent = 'This model is not downloaded yet.';
+        dlStatus.style.display = '';
+      } else {
+        dlStatus.style.display = 'none';
+      }
+    }
+  }
+
+  // ── Backfill status ─────────────────────────────────────────────────────────
 
   async function _checkBackfillStatus() {
     try {
       const s = await fetch('/api/settings/backfill-status').then(r => r.json());
       const statusEl = document.getElementById('backfillStatus');
       if (!statusEl) return;
-      if (s.running) {
+      if (s.error) {
+        statusEl.style.display = '';
+        statusEl.textContent = `Backfill error: ${s.error}`;
+      } else if (s.running) {
         statusEl.style.display = '';
         statusEl.textContent = `Backfill: ${s.done} / ${s.total} snapshots reprocessed`;
-        if (!_pollIntervalId) _startPoll(statusEl);
+        if (!_pollIntervalId) _startBackfillPoll(statusEl);
       } else if (s.total > 0) {
         statusEl.style.display = '';
         statusEl.textContent = `Last backfill: ${s.total} snapshots reprocessed`;
       }
-    } catch { /* server may not have run a backfill yet */ }
+    } catch { /* ok */ }
   }
 
-  function _startPoll(statusEl) {
+  function _startBackfillPoll(statusEl) {
     if (_pollIntervalId) clearInterval(_pollIntervalId);
     _pollIntervalId = setInterval(async () => {
       try {
         const s = await fetch('/api/settings/backfill-status').then(r => r.json());
-        if (s.total > 0) {
+        if (s.error) {
+          statusEl.textContent = `Backfill error: ${s.error}`;
+          clearInterval(_pollIntervalId); _pollIntervalId = null;
+        } else if (s.total > 0) {
           statusEl.textContent = `Backfill: ${s.done} / ${s.total} snapshots reprocessed`;
         }
         if (!s.running) {
-          clearInterval(_pollIntervalId);
-          _pollIntervalId = null;
-          statusEl.textContent = `Backfill complete — ${s.total} snapshots reprocessed`;
-          setTimeout(() => { if (statusEl.textContent.startsWith('Backfill complete')) statusEl.style.display = 'none'; }, 8000);
+          clearInterval(_pollIntervalId); _pollIntervalId = null;
+          if (!s.error) {
+            statusEl.textContent = `Backfill complete — ${s.total} snapshots reprocessed`;
+            setTimeout(() => { statusEl.style.display = 'none'; }, 8000);
+          }
         }
-      } catch {
-        clearInterval(_pollIntervalId);
-        _pollIntervalId = null;
-      }
+      } catch { clearInterval(_pollIntervalId); _pollIntervalId = null; }
     }, 3000);
   }
 
+  // ── Init / listeners ────────────────────────────────────────────────────────
+
   function init() {
-    if (!_initialized) {
-      _initialized = true;
-      _attachListeners();
-    }
+    if (!_initialized) { _initialized = true; _attachListeners(); }
     load();
   }
 
   function _attachListeners() {
     document.getElementById('settingsForm').addEventListener('submit', async e => {
       e.preventDefault();
-      const form = e.target;
       const data = {};
       for (const key of FORM_FIELDS) {
-        const el = form.elements[key];
+        const el = e.target.elements[key];
         if (el) data[key] = el.type === 'number' ? Number(el.value) : el.value;
       }
       await Data.saveSettings(data);
@@ -93,9 +184,8 @@ const SettingsManager = (() => {
       btn.disabled = true; btn.textContent = 'Generating…';
       try {
         const res = await Data.generateDeployKey();
-        const display = document.getElementById('publicKeyDisplay');
-        display.textContent = res.public_key;
-        display.style.display = 'block';
+        document.getElementById('publicKeyDisplay').textContent = res.public_key;
+        document.getElementById('publicKeyDisplay').style.display = 'block';
         _toast('Key generated — copy the public key above');
       } catch (err) {
         _toast('Key generation failed: ' + err.message, true);
@@ -104,48 +194,86 @@ const SettingsManager = (() => {
       }
     });
 
+    // Model selection changed — refresh button states
+    document.getElementById('modelSelect').addEventListener('change', async () => {
+      try {
+        const status = await fetch('/api/settings/model-status').then(r => r.json());
+        _updateModelButtons(status);
+      } catch { _updateModelButtons(null); }
+    });
+
+    // Download selected model
+    document.getElementById('btnDownloadModel').addEventListener('click', async () => {
+      const model = document.getElementById('modelSelect').value;
+      const dlBtn = document.getElementById('btnDownloadModel');
+      dlBtn.disabled = true; dlBtn.textContent = '⟳ Starting…';
+      try {
+        await fetch('/api/settings/download-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model }),
+        });
+        _toast(`Download started for ${model}`);
+        // Start polling model status
+        if (!_modelStatusPollId) {
+          _modelStatusPollId = setInterval(async () => {
+            try {
+              const s = await fetch('/api/settings/model-status').then(r => r.json());
+              _applyModelStatus(s);
+              if (!Object.values(s).some(x => x.downloading)) {
+                clearInterval(_modelStatusPollId); _modelStatusPollId = null;
+              }
+            } catch { clearInterval(_modelStatusPollId); _modelStatusPollId = null; }
+          }, 2000);
+        }
+      } catch {
+        _toast('Download request failed', true);
+        dlBtn.disabled = false; dlBtn.textContent = '⬇ Download';
+      }
+    });
+
+    // Switch model (only enabled when model is available)
     document.getElementById('btnSwitchModel').addEventListener('click', async () => {
-      const select = document.getElementById('modelSelect');
-      const model = select.value;
+      const model = document.getElementById('modelSelect').value;
       const statusEl = document.getElementById('backfillStatus');
-      if (!confirm(`Switch to ${model}?\n\nThis will delete all annotated images and reprocess every snapshot with the new model. Counts in the DB will be updated. This runs in the background.`)) return;
+      if (!confirm(`Switch to ${model}?\n\nThis deletes all annotated images and reprocesses every snapshot in the background.`)) return;
 
       statusEl.textContent = 'Switching model and starting backfill…';
       statusEl.style.display = '';
       if (_pollIntervalId) { clearInterval(_pollIntervalId); _pollIntervalId = null; }
 
       try {
-        await fetch('/api/settings/switch-model', {
+        const res = await fetch('/api/settings/switch-model', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ model }),
         });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Unknown error');
+        }
         _toast(`Switched to ${model} — backfill queued`);
-        _startPoll(statusEl);
-      } catch {
-        _toast('Model switch failed', true);
+        _startBackfillPoll(statusEl);
+      } catch (e) {
+        _toast(`Model switch failed: ${e.message}`, true);
         statusEl.style.display = 'none';
       }
     });
 
     document.getElementById('btnDiscoverNow').addEventListener('click', async () => {
-      await Data.triggerDiscovery();
-      _toast('Discovery triggered');
+      await Data.triggerDiscovery(); _toast('Discovery triggered');
     });
 
     document.getElementById('btnExportNow').addEventListener('click', async () => {
-      await Data.triggerExport();
-      _toast('Export triggered');
+      await Data.triggerExport(); _toast('Export triggered');
     });
 
     document.getElementById('addCameraForm').addEventListener('submit', async e => {
       e.preventDefault();
       const fd = new FormData(e.target);
       await Data.addCamera({
-        url: fd.get('url'),
-        address: fd.get('address'),
-        lat: parseFloat(fd.get('lat')),
-        lon: parseFloat(fd.get('lon')),
+        url: fd.get('url'), address: fd.get('address'),
+        lat: parseFloat(fd.get('lat')), lon: parseFloat(fd.get('lon')),
       });
       e.target.reset();
       _toast('Camera added');
@@ -158,8 +286,7 @@ const SettingsManager = (() => {
 
   async function renderCameraList() {
     const cameras = await Data.getCameras();
-    const container = document.getElementById('cameraList');
-    container.innerHTML = cameras.map(c => `
+    document.getElementById('cameraList').innerHTML = cameras.map(c => `
       <div class="camera-item">
         <div class="camera-item-info">
           <div class="camera-item-name">${c.address}</div>
@@ -174,15 +301,10 @@ const SettingsManager = (() => {
     `).join('');
   }
 
-  async function removeCamera(id) {
-    await Data.deleteCamera(id);
-    await renderCameraList();
-  }
-
+  async function removeCamera(id) { await Data.deleteCamera(id); await renderCameraList(); }
   async function toggleCamera(id, active) {
     await fetch(`/api/cameras/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active: !!active }),
     });
     await renderCameraList();

@@ -16,8 +16,14 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # Install playwright (browser download happens in runtime stage)
 RUN pip install --no-cache-dir playwright
 
-# Pre-download YOLOv8 nano weights — ultralytics saves to WORKDIR (/build/yolov8n.pt)
-RUN PYTHONPATH=/install/lib/python3.12/site-packages python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+# Pre-download model weights into the image so the NAS doesn't need internet at runtime.
+# Ultralytics saves to WORKDIR (/build/) when the model file doesn't exist there.
+RUN PYTHONPATH=/install/lib/python3.12/site-packages python -c "
+from ultralytics import YOLO
+for m in ['yolov8n.pt', 'yolo11n.pt', 'yolo11s.pt']:
+    YOLO(m)
+    print(f'Downloaded {m}')
+"
 
 
 FROM python:3.12-slim
@@ -72,7 +78,10 @@ WORKDIR /app
 COPY . .
 
 # Bundle weights inside the image (not under /data which is a volume mount)
+RUN mkdir -p /app/weights
 COPY --from=builder /build/yolov8n.pt /app/weights/yolov8n.pt
+COPY --from=builder /build/yolo11n.pt /app/weights/yolo11n.pt
+COPY --from=builder /build/yolo11s.pt /app/weights/yolo11s.pt
 
 RUN chmod +x /app/entrypoint.sh
 

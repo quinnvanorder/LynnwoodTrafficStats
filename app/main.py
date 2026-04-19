@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import database, scheduler, settings
+from . import database, model_manager, scheduler, settings
 from .api import cameras, events, export
 from .api import settings_api
 from .api import snapshots as snapshots_api
@@ -33,6 +33,9 @@ async def lifespan(app: FastAPI):
         snapshot_interval=cfg["snapshot_interval_seconds"],
         export_interval=cfg["static_export_interval_seconds"],
     )
+
+    # Ensure the configured model is available (downloads in background if missing)
+    model_manager.ensure_model_background(cfg["detection_model"])
 
     # Run initial discovery in a background thread if no cameras exist
     cameras_list = database.get_cameras(active_only=False)

@@ -242,3 +242,4 @@ pre#publicKeyDisplay {
   flex: 1; min-width: 200px; background: var(--surface2); color: var(--text);
   border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px;
 }
+.model-action-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }

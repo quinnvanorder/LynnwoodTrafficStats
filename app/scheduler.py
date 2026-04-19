@@ -18,7 +18,7 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 IMAGES_DIR = DATA_DIR / "images"
 
 _scheduler: BackgroundScheduler | None = None
-_backfill_status: dict = {"running": False, "done": 0, "total": 0}
+_backfill_status: dict = {"running": False, "done": 0, "total": 0, "error": None}
 _backfill_generation: int = 0
 
 
@@ -140,13 +140,24 @@ def snapshot_job() -> None:
 def backfill_job(model_name: str | None = None, generation: int = 0) -> None:
     global _backfill_status
 
+    from . import model_manager
+
     cfg = settings.load()
     model = model_name or cfg["detection_model"]
     confidence = cfg["detection_confidence_threshold"]
     imgsz = cfg.get("detection_imgsz", 640)
 
+    # Validate model before touching any snapshots
+    if not model_manager.is_available(model):
+        _backfill_status = {
+            "running": False, "done": 0, "total": 0,
+            "error": f"Model '{model}' not found — download it from Settings first.",
+        }
+        logger.error("Backfill aborted: model '%s' not available", model)
+        return
+
     snapshots = database.get_snapshots_for_backfill()
-    _backfill_status = {"running": True, "done": 0, "total": len(snapshots)}
+    _backfill_status = {"running": True, "done": 0, "total": len(snapshots), "error": None}
     logger.info("Backfill started: %d snapshots model=%s imgsz=%d", len(snapshots), model, imgsz)
 
     cam_zones: dict = {}
@@ -177,6 +188,7 @@ def backfill_job(model_name: str | None = None, generation: int = 0) -> None:
         _backfill_status["done"] += 1
 
     _backfill_status["running"] = False
+    _backfill_status["error"] = None
     logger.info("Backfill complete: %d snapshots", len(snapshots))
 
 
@@ -230,7 +242,7 @@ def trigger_backfill(model_name: str | None = None) -> None:
     global _backfill_generation, _backfill_status
     _backfill_generation += 1
     gen = _backfill_generation
-    _backfill_status = {"running": False, "done": 0, "total": 0}
+    _backfill_status = {"running": False, "done": 0, "total": 0, "error": None}
     if _scheduler:
         _scheduler.add_job(
             backfill_job, trigger="date", id="backfill_manual",

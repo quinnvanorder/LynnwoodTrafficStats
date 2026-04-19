@@ -10,14 +10,9 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
 os.environ.setdefault("YOLO_CONFIG_DIR", "/tmp")
 os.environ.setdefault("FC_CACHEDIR", "/tmp")
 
-from pathlib import Path
-
 import cv2
 import numpy as np
 from PIL import Image
-
-DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
-MODELS_DIR = DATA_DIR / "models"
 
 # COCO class IDs we care about
 WANTED_CLASSES = {
@@ -30,23 +25,27 @@ WANTED_CLASSES = {
 }
 
 _model = None
+_model_name: str | None = None
 
 
 def _get_model(model_name: str = "yolov8n.pt"):
-    global _model
-    if _model is None:
+    global _model, _model_name
+    if _model is None or _model_name != model_name:
+        from . import model_manager
         from ultralytics import YOLO
         import torch
-        # Disable NNPACK before any inference. NNPACK_DISABLE=1 env var doesn't
-        # suppress these warnings when PyTorch runs on background threads (the
-        # C++ → Python warning bridge is bypassed). This API call disables the
-        # NNPACK convolution path at the dispatcher level so it's never attempted.
+        # Disable NNPACK at the dispatcher level — env var alone doesn't suppress
+        # warnings when PyTorch runs in APScheduler background threads.
         if hasattr(torch.backends, "nnpack"):
             torch.backends.nnpack.enabled = False
-        model_path = MODELS_DIR / model_name
-        if not model_path.exists():
-            model_path = model_name
+        model_path = model_manager.find_model(model_name)
+        if model_path is None:
+            raise FileNotFoundError(
+                f"Model '{model_name}' not found. "
+                "Download it from Settings → Detection Model."
+            )
         _model = YOLO(str(model_path))
+        _model_name = model_name
     return _model
 
 

@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <link rel="stylesheet" href="css/main.css?v=8" />
+  <link rel="stylesheet" href="css/main.css?v=9" />
 </head>
 <body>
 
@@ -140,23 +140,27 @@
     <div class="model-switch-row">
       <select id="modelSelect">
         <optgroup label="YOLO11 (recommended — newer, more efficient)">
-          <option value="yolo11n.pt">YOLO11 Nano — fastest</option>
-          <option value="yolo11s.pt" selected>YOLO11 Small — best balance for NAS</option>
-          <option value="yolo11m.pt">YOLO11 Medium — high accuracy</option>
-          <option value="yolo11l.pt">YOLO11 Large — very accurate, slow on CPU</option>
+          <option value="yolo11n.pt" data-label="YOLO11 Nano — fastest">YOLO11 Nano — fastest</option>
+          <option value="yolo11s.pt" data-label="YOLO11 Small — best balance for NAS">YOLO11 Small — best balance for NAS</option>
+          <option value="yolo11m.pt" data-label="YOLO11 Medium — high accuracy">YOLO11 Medium — high accuracy</option>
+          <option value="yolo11l.pt" data-label="YOLO11 Large — very accurate, slow on CPU">YOLO11 Large — very accurate, slow on CPU</option>
         </optgroup>
         <optgroup label="YOLOv8 (proven, widely used)">
-          <option value="yolov8n.pt">YOLOv8 Nano — fastest</option>
-          <option value="yolov8s.pt">YOLOv8 Small</option>
-          <option value="yolov8m.pt">YOLOv8 Medium</option>
-          <option value="yolov8l.pt">YOLOv8 Large</option>
+          <option value="yolov8n.pt" data-label="YOLOv8 Nano — fastest">YOLOv8 Nano — fastest</option>
+          <option value="yolov8s.pt" data-label="YOLOv8 Small">YOLOv8 Small</option>
+          <option value="yolov8m.pt" data-label="YOLOv8 Medium">YOLOv8 Medium</option>
+          <option value="yolov8l.pt" data-label="YOLOv8 Large">YOLOv8 Large</option>
         </optgroup>
         <optgroup label="RT-DETR (transformer — best at small/occluded objects)">
-          <option value="rtdetr-l.pt">RT-DETR Large — excellent, GPU recommended</option>
-          <option value="rtdetr-x.pt">RT-DETR X-Large — highest accuracy</option>
+          <option value="rtdetr-l.pt" data-label="RT-DETR Large — excellent, GPU recommended">RT-DETR Large — excellent, GPU recommended</option>
+          <option value="rtdetr-x.pt" data-label="RT-DETR X-Large — highest accuracy">RT-DETR X-Large — highest accuracy</option>
         </optgroup>
       </select>
-      <button id="btnSwitchModel" class="btn-primary">Switch &amp; Reprocess</button>
+    </div>
+    <div class="model-action-row">
+      <button id="btnDownloadModel" class="btn-secondary" style="display:none">⬇ Download</button>
+      <button id="btnSwitchModel" class="btn-primary" disabled>Switch &amp; Reprocess</button>
+      <span id="modelDownloadStatus" class="hint" style="display:none"></span>
     </div>
     <div id="backfillStatus" class="hint" style="display:none"></div>
 
@@ -198,11 +202,11 @@
   </div>
 </div>
 
-<script src="js/data.js?v=8"></script>
-<script src="js/map.js?v=8"></script>
-<script src="js/cameras.js?v=8"></script>
-<script src="js/settings.js?v=8"></script>
-<script src="js/realtime.js?v=8"></script>
-<script src="js/app.js?v=8"></script>
+<script src="js/data.js?v=9"></script>
+<script src="js/map.js?v=9"></script>
+<script src="js/cameras.js?v=9"></script>
+<script src="js/settings.js?v=9"></script>
+<script src="js/realtime.js?v=9"></script>
+<script src="js/app.js?v=9"></script>
 </body>
 </html>
