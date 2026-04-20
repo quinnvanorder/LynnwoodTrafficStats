@@ -10,6 +10,8 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
 os.environ.setdefault("YOLO_CONFIG_DIR", "/tmp")
 os.environ.setdefault("FC_CACHEDIR", "/tmp")
 
+import math
+
 import cv2
 import numpy as np
 from PIL import Image
@@ -49,8 +51,28 @@ def _get_model(model_name: str = "yolov8n.pt"):
     return _model
 
 
+def _zone_polygon(zone, w: int, h: int) -> list[tuple]:
+    """Convert a zone to pixel-space polygon corners.
+
+    Accepts both old [x1,y1,x2,y2] lists and new {cx,cy,w,h,angle} dicts.
+    """
+    if isinstance(zone, dict):
+        cx, cy = zone['cx'] * w, zone['cy'] * h
+        hw, hh = zone['w'] * w / 2, zone['h'] * h / 2
+        a = zone.get('angle', 0)
+        cos_a, sin_a = math.cos(a), math.sin(a)
+        return [
+            (cx - hw * cos_a + hh * sin_a, cy - hw * sin_a - hh * cos_a),
+            (cx + hw * cos_a + hh * sin_a, cy + hw * sin_a - hh * cos_a),
+            (cx + hw * cos_a - hh * sin_a, cy + hw * sin_a + hh * cos_a),
+            (cx - hw * cos_a - hh * sin_a, cy - hw * sin_a + hh * cos_a),
+        ]
+    x1, y1, x2, y2 = zone
+    return [(x1*w, y1*h), (x2*w, y1*h), (x2*w, y2*h), (x1*w, y2*h)]
+
+
 def apply_exclusion_zones(image: Image.Image, zones: list) -> Image.Image:
-    """Black out rectangular zones before inference. Zones: [[x1,y1,x2,y2], ...] as 0.0–1.0 fractions."""
+    """Black out zones before inference (supports axis-aligned and rotated rects)."""
     if not zones:
         return image
     from PIL import ImageDraw
@@ -58,9 +80,22 @@ def apply_exclusion_zones(image: Image.Image, zones: list) -> Image.Image:
     draw = ImageDraw.Draw(img)
     w, h = img.size
     for zone in zones:
-        x1, y1, x2, y2 = zone
-        draw.rectangle([x1 * w, y1 * h, x2 * w, y2 * h], fill=(0, 0, 0))
+        draw.polygon(_zone_polygon(zone, w, h), fill=(0, 0, 0))
     return img
+
+
+def draw_zone_overlay(image: Image.Image, zones: list) -> Image.Image:
+    """Draw grey semi-opaque zone markers on an already-annotated image."""
+    if not zones:
+        return image
+    from PIL import Image as PILImage, ImageDraw
+    overlay = PILImage.new('RGBA', image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    w, h = image.size
+    for zone in zones:
+        draw.polygon(_zone_polygon(zone, w, h), fill=(120, 120, 120, 140))
+    base = image.convert('RGBA')
+    return PILImage.alpha_composite(base, overlay).convert('RGB')
 
 
 def detect(

@@ -27,14 +27,23 @@ const SidebarCameras = (() => {
 
   // Fullscreen overlay refs
   let _fsOverlay = null;
-  let _fsMedia = null;  // img or video in overlay
+  let _fsMedia = null;
 
   // Zone editor state
-  let _zones = [];            // [[x1,y1,x2,y2], ...] as 0.0–1.0 fractions
+  let _zones = [];           // [{cx,cy,w,h,angle}, ...] normalized 0–1
   let _zoneEditing = false;
-  let _zoneDrag = null;       // {startX, startY, rect: <canvas rect>}
+  let _selectedIdx = -1;
+  let _zoneDragMode = null;  // {type, ...}
+  let _bgImage = null;
+  let _zoneCW = 0, _zoneCH = 0;
+  let _zoneCanvas = null;
+
+  const HANDLE_R  = 6;   // handle radius px
+  const ROT_DIST  = 30;  // rotation handle offset above top edge px
 
   let _listEl, _searchEl;
+
+  // ── Init ─────────────────────────────────────────────────────────────────────
 
   function init(onSelectCallback) {
     _onSelect = onSelectCallback;
@@ -45,15 +54,14 @@ const SidebarCameras = (() => {
     _listEl.addEventListener('click', e => {
       const header = e.target.closest('.scam-header');
       if (header) { _toggleExpand(Number(header.closest('.scam-item').dataset.camId)); return; }
-      if (e.target.closest('.scam-play-btn'))     { _startPlay(); return; }
-      if (e.target.closest('.scam-stop-btn'))     { _stopPlay();  return; }
+      if (e.target.closest('.scam-play-btn'))   { _startPlay();        return; }
+      if (e.target.closest('.scam-stop-btn'))   { _stopPlay();         return; }
       if (e.target.closest('.scam-image-wrap') && !_zoneEditing) { _openFullscreen(); return; }
-      if (e.target.closest('.scam-zone-btn'))     { _toggleZoneEditor(); return; }
-      if (e.target.closest('.scam-zone-clear'))   { _clearZones(); return; }
-      if (e.target.closest('.scam-zone-save'))    { _saveZones(); return; }
+      if (e.target.closest('.scam-zone-btn'))   { _toggleZoneEditor(); return; }
+      if (e.target.closest('.scam-zone-clear')) { _clearZones();       return; }
+      if (e.target.closest('.scam-zone-save'))  { _saveZones();        return; }
     });
 
-    // Range scrub (delegated — range inputs don't bubble click)
     document.addEventListener('input', e => {
       if (e.target && e.target.id === 'scamScrubBar') {
         const vid = document.getElementById('scamDetailVideo');
@@ -64,6 +72,18 @@ const SidebarCameras = (() => {
     document.addEventListener('mouseup',   () => _scrubbing = false);
     document.addEventListener('touchstart', e => { if (e.target?.id === 'scamScrubBar') _scrubbing = true; });
     document.addEventListener('touchend',  () => _scrubbing = false);
+
+    // Zone editor: Delete key removes selected zone
+    document.addEventListener('keydown', e => {
+      if (!_zoneEditing || _selectedIdx < 0) return;
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        _zones.splice(_selectedIdx, 1);
+        _selectedIdx = _zones.length > 0 ? Math.min(_selectedIdx, _zones.length - 1) : -1;
+        _drawZoneCanvas();
+      }
+    });
   }
 
   function setStaticMode(s) { _isStaticMode = s; }
@@ -85,9 +105,13 @@ const SidebarCameras = (() => {
       _stopPlay();
       _expandedId = null;
       _zoneEditing = false;
+      _zoneCanvas = null;
+      _selectedIdx = -1;
     } else {
       _stopPlay();
       _zoneEditing = false;
+      _zoneCanvas = null;
+      _selectedIdx = -1;
       _expandedId = id;
       const cam = _stats.find(c => c.id === id);
       if (cam && _onSelect) _onSelect(cam);
@@ -149,7 +173,7 @@ const SidebarCameras = (() => {
   </div>
   ${scrubHtml}
   <div class="scam-zone-toolbar">
-    <button class="btn-secondary btn-sm scam-zone-btn" title="Draw rectangles over areas to ignore during detection">🎯 Exclusion Zones</button>
+    <button class="btn-secondary btn-sm scam-zone-btn" title="Draw zones over areas to ignore during detection">🎯 Exclusion Zones</button>
     <button class="btn-secondary btn-sm scam-zone-clear" style="display:none">✕ Clear All</button>
     <button class="btn-primary btn-sm scam-zone-save" style="display:none">Save</button>
   </div>
@@ -274,7 +298,6 @@ const SidebarCameras = (() => {
     if (fillEl) fillEl.style.width = pct + '%';
     const scrub = document.getElementById('scamScrubBar');
     if (scrub && !_scrubbing) scrub.value = vid.currentTime;
-    // Keep fullscreen video in sync
     if (_fsMedia && _fsMedia.tagName === 'VIDEO') {
       if (Math.abs(_fsMedia.currentTime - vid.currentTime) > 0.5) {
         _fsMedia.currentTime = vid.currentTime;
@@ -305,17 +328,14 @@ const SidebarCameras = (() => {
     _setPlayBtns(false);
   }
 
-  // ── Shared play helpers ──────────────────────────────────────────────────────
-
   function _startPlay() { if (_isStaticMode) _startPlayStatic(); else _startPlayLAN(); }
   function _stopPlay()  { if (_isStaticMode) _stopPlayStatic();  else _stopPlayLAN();  }
 
   function _setPlayBtns(playing) {
-    const p = document.getElementById('scamPlayBtn') || _listEl.querySelector('.scam-play-btn');
-    const s = document.getElementById('scamStopBtn') || _listEl.querySelector('.scam-stop-btn');
+    const p = _listEl.querySelector('.scam-play-btn');
+    const s = _listEl.querySelector('.scam-stop-btn');
     if (p) p.style.display = playing ? 'none' : '';
     if (s) s.style.display = playing ? '' : 'none';
-    // Also sync fullscreen buttons
     if (_fsOverlay) {
       const fp = _fsOverlay.querySelector('.scam-fs-play');
       const fs = _fsOverlay.querySelector('.scam-fs-stop');
@@ -331,7 +351,6 @@ const SidebarCameras = (() => {
     const overlay = document.createElement('div');
     overlay.className = 'scam-fs-overlay';
 
-    // Media
     if (_isStaticMode) {
       const vid = document.getElementById('scamDetailVideo');
       _fsMedia = document.createElement('video');
@@ -341,7 +360,6 @@ const SidebarCameras = (() => {
       _fsMedia.muted = true;
       _fsMedia.className = 'scam-fs-media';
       if (vid && !vid.paused) _fsMedia.play().catch(() => {});
-      // Restore ontimeupdate on sidebar video to also keep overlay in sync
       if (vid) vid.ontimeupdate = _onVideoTimeUpdate;
     } else {
       const imgEl = document.getElementById('scamDetailImg');
@@ -351,7 +369,6 @@ const SidebarCameras = (() => {
       _fsMedia.className = 'scam-fs-media';
     }
 
-    // Controls bar
     const controls = document.createElement('div');
     controls.className = 'scam-fs-controls';
 
@@ -369,7 +386,6 @@ const SidebarCameras = (() => {
     const statsEl = document.createElement('div');
     statsEl.className = 'scam-fs-stats cp-stats-grid';
     statsEl.id = 'scamFsStats';
-    // Populate with current counts
     const cam = _stats.find(c => c.id === _expandedId);
     if (cam) statsEl.innerHTML = _statsGridHtml(cam);
 
@@ -377,12 +393,10 @@ const SidebarCameras = (() => {
     controls.appendChild(stopBtn);
     controls.appendChild(statsEl);
 
-    // Sync initial button state
     const isPlaying = !!_playTimer || (!!document.getElementById('scamDetailVideo') && !document.getElementById('scamDetailVideo').paused);
     playBtn.style.display = isPlaying ? 'none' : '';
     stopBtn.style.display = isPlaying ? '' : 'none';
 
-    // Close button
     const closeBtn = document.createElement('button');
     closeBtn.className = 'scam-fs-close';
     closeBtn.textContent = '✕';
@@ -404,7 +418,6 @@ const SidebarCameras = (() => {
     _fsOverlay = null;
     _fsMedia = null;
     document.removeEventListener('keydown', _fsEsc);
-    // Restore video timeupdate on sidebar
     if (_isStaticMode) {
       const vid = document.getElementById('scamDetailVideo');
       if (vid) vid.ontimeupdate = _onVideoTimeUpdate;
@@ -418,33 +431,311 @@ const SidebarCameras = (() => {
     if (el) el.innerHTML = _statsGridHtml(obj);
   }
 
-  // ── Zone editor ──────────────────────────────────────────────────────────────
+  // ── Zone geometry helpers ────────────────────────────────────────────────────
+
+  function _zCorners(z) {
+    const cx = z.cx * _zoneCW, cy = z.cy * _zoneCH;
+    const hw = z.w * _zoneCW / 2, hh = z.h * _zoneCH / 2;
+    const cos = Math.cos(z.angle), sin = Math.sin(z.angle);
+    return [
+      { x: cx - hw*cos + hh*sin, y: cy - hw*sin - hh*cos, name: 'nw' },
+      { x: cx + hw*cos + hh*sin, y: cy + hw*sin - hh*cos, name: 'ne' },
+      { x: cx + hw*cos - hh*sin, y: cy + hw*sin + hh*cos, name: 'se' },
+      { x: cx - hw*cos - hh*sin, y: cy - hw*sin + hh*cos, name: 'sw' },
+    ];
+  }
+
+  function _zEdges(z) {
+    const cx = z.cx * _zoneCW, cy = z.cy * _zoneCH;
+    const hw = z.w * _zoneCW / 2, hh = z.h * _zoneCH / 2;
+    const cos = Math.cos(z.angle), sin = Math.sin(z.angle);
+    return [
+      { x: cx + hh*sin,  y: cy - hh*cos,  name: 'n' },
+      { x: cx + hw*cos,  y: cy + hw*sin,  name: 'e' },
+      { x: cx - hh*sin,  y: cy + hh*cos,  name: 's' },
+      { x: cx - hw*cos,  y: cy - hw*sin,  name: 'w' },
+    ];
+  }
+
+  function _zRotHandle(z) {
+    const cx = z.cx * _zoneCW, cy = z.cy * _zoneCH;
+    const hh = z.h * _zoneCH / 2;
+    const dist = hh + ROT_DIST;
+    const cos = Math.cos(z.angle), sin = Math.sin(z.angle);
+    return { x: cx + dist * sin, y: cy - dist * cos };
+  }
+
+  function _zOpposite(z, name) {
+    const opp = { nw:'se', ne:'sw', se:'nw', sw:'ne', n:'s', s:'n', e:'w', w:'e' };
+    return [..._zCorners(z), ..._zEdges(z)].find(h => h.name === opp[name]);
+  }
+
+  function _ptInZone(px, py, z) {
+    const cx = z.cx * _zoneCW, cy = z.cy * _zoneCH;
+    const dx = px - cx, dy = py - cy;
+    const cos = Math.cos(-z.angle), sin = Math.sin(-z.angle);
+    const lx = dx*cos - dy*sin, ly = dx*sin + dy*cos;
+    return Math.abs(lx) <= z.w * _zoneCW / 2 && Math.abs(ly) <= z.h * _zoneCH / 2;
+  }
+
+  function _zXY(e) {
+    const r = _zoneCanvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  function _zdist(x1, y1, x2, y2) { return Math.hypot(x2 - x1, y2 - y1); }
+
+  // ── Zone canvas mouse handlers ───────────────────────────────────────────────
+
+  function _onZDown(e) {
+    if (!_zoneCanvas) return;
+    const { x, y } = _zXY(e);
+
+    if (_selectedIdx >= 0) {
+      const z = _zones[_selectedIdx];
+      const rh = _zRotHandle(z);
+      if (_zdist(x, y, rh.x, rh.y) <= HANDLE_R + 4) {
+        _zoneDragMode = { type: 'rotate', idx: _selectedIdx };
+        return;
+      }
+      for (const h of [..._zCorners(z), ..._zEdges(z)]) {
+        if (_zdist(x, y, h.x, h.y) <= HANDLE_R + 4) {
+          const opp = _zOpposite(z, h.name);
+          _zoneDragMode = { type: 'resize', idx: _selectedIdx, handle: h.name, fixedX: opp.x, fixedY: opp.y };
+          return;
+        }
+      }
+    }
+
+    for (let i = _zones.length - 1; i >= 0; i--) {
+      if (_ptInZone(x, y, _zones[i])) {
+        _selectedIdx = i;
+        _zoneDragMode = { type: 'move', idx: i, startX: x, startY: y, startCX: _zones[i].cx, startCY: _zones[i].cy };
+        _drawZoneCanvas();
+        return;
+      }
+    }
+
+    _selectedIdx = -1;
+    _zoneDragMode = { type: 'create', startX: x, startY: y };
+    _drawZoneCanvas();
+  }
+
+  function _onZMove(e) {
+    if (!_zoneCanvas) return;
+    const { x, y } = _zXY(e);
+
+    if (!_zoneDragMode) { _updateZCursor(x, y); return; }
+
+    const dm = _zoneDragMode;
+    if (dm.type === 'create') {
+      _drawZoneCanvas({
+        x1: Math.min(dm.startX, x), y1: Math.min(dm.startY, y),
+        x2: Math.max(dm.startX, x), y2: Math.max(dm.startY, y),
+      });
+    } else if (dm.type === 'move') {
+      _zones[dm.idx].cx = Math.max(0, Math.min(1, dm.startCX + (x - dm.startX) / _zoneCW));
+      _zones[dm.idx].cy = Math.max(0, Math.min(1, dm.startCY + (y - dm.startY) / _zoneCH));
+      _drawZoneCanvas();
+    } else if (dm.type === 'rotate') {
+      const z = _zones[dm.idx];
+      const cx = z.cx * _zoneCW, cy = z.cy * _zoneCH;
+      _zones[dm.idx].angle = Math.atan2(x - cx, -(y - cy));
+      _drawZoneCanvas();
+    } else if (dm.type === 'resize') {
+      _applyResize(dm, x, y);
+      _drawZoneCanvas();
+    }
+  }
+
+  function _onZUp(e) {
+    if (!_zoneDragMode) return;
+    const { x, y } = _zXY(e);
+
+    if (_zoneDragMode.type === 'create') {
+      const x1 = Math.min(_zoneDragMode.startX, x) / _zoneCW;
+      const y1 = Math.min(_zoneDragMode.startY, y) / _zoneCH;
+      const x2 = Math.max(_zoneDragMode.startX, x) / _zoneCW;
+      const y2 = Math.max(_zoneDragMode.startY, y) / _zoneCH;
+      const w = x2 - x1, h = y2 - y1;
+      if (w > 0.02 && h > 0.02) {
+        _zones.push({ cx: x1 + w / 2, cy: y1 + h / 2, w, h, angle: 0 });
+        _selectedIdx = _zones.length - 1;
+      }
+    }
+    _zoneDragMode = null;
+    _drawZoneCanvas();
+  }
+
+  function _onZLeave() {
+    if (_zoneDragMode?.type === 'create') { _zoneDragMode = null; _drawZoneCanvas(); }
+  }
+
+  function _applyResize(dm, mx, my) {
+    const z = _zones[dm.idx];
+    const cos = Math.cos(z.angle), sin = Math.sin(z.angle);
+
+    // For edge handles, constrain cursor to the correct local axis
+    let cx = mx, cy = my;
+    if (dm.handle === 'n' || dm.handle === 's') {
+      // constrain to local Y through fixed point
+      const dot = (mx - dm.fixedX) * (-sin) + (my - dm.fixedY) * cos;
+      cx = dm.fixedX + dot * (-sin);
+      cy = dm.fixedY + dot * cos;
+    } else if (dm.handle === 'e' || dm.handle === 'w') {
+      // constrain to local X through fixed point
+      const dot = (mx - dm.fixedX) * cos + (my - dm.fixedY) * sin;
+      cx = dm.fixedX + dot * cos;
+      cy = dm.fixedY + dot * sin;
+    }
+
+    const newCX = (cx + dm.fixedX) / 2;
+    const newCY = (cy + dm.fixedY) / 2;
+    const halfX = cx - newCX, halfY = cy - newCY;
+    const localHW = halfX * cos + halfY * sin;
+    const localHH = -halfX * sin + halfY * cos;
+
+    _zones[dm.idx] = {
+      ...z,
+      cx: newCX / _zoneCW,
+      cy: newCY / _zoneCH,
+      w: Math.max(0.02, Math.abs(localHW) * 2 / _zoneCW),
+      h: Math.max(0.02, Math.abs(localHH) * 2 / _zoneCH),
+    };
+  }
+
+  function _updateZCursor(x, y) {
+    if (!_zoneCanvas) return;
+    if (_selectedIdx >= 0) {
+      const z = _zones[_selectedIdx];
+      if (_zdist(x, y, _zRotHandle(z).x, _zRotHandle(z).y) <= HANDLE_R + 4) {
+        _zoneCanvas.style.cursor = 'grab'; return;
+      }
+      for (const h of [..._zCorners(z), ..._zEdges(z)]) {
+        if (_zdist(x, y, h.x, h.y) <= HANDLE_R + 4) {
+          _zoneCanvas.style.cursor = 'pointer'; return;
+        }
+      }
+    }
+    for (let i = _zones.length - 1; i >= 0; i--) {
+      if (_ptInZone(x, y, _zones[i])) { _zoneCanvas.style.cursor = 'move'; return; }
+    }
+    _zoneCanvas.style.cursor = 'crosshair';
+  }
+
+  // ── Zone canvas drawing ──────────────────────────────────────────────────────
+
+  function _drawZoneCanvas(preview = null) {
+    if (!_zoneCanvas) return;
+    const ctx = _zoneCanvas.getContext('2d');
+    const cw = _zoneCW, ch = _zoneCH;
+    ctx.clearRect(0, 0, cw, ch);
+
+    if (_bgImage) {
+      ctx.drawImage(_bgImage, 0, 0, cw, ch);
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      ctx.fillRect(0, 0, cw, ch);
+    } else {
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, cw, ch);
+    }
+
+    for (let i = 0; i < _zones.length; i++) {
+      _drawZone(ctx, _zones[i], i === _selectedIdx);
+    }
+
+    if (preview) {
+      ctx.fillStyle = 'rgba(239,68,68,0.28)';
+      ctx.strokeStyle = '#fca5a5';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.fillRect(preview.x1, preview.y1, preview.x2 - preview.x1, preview.y2 - preview.y1);
+      ctx.strokeRect(preview.x1, preview.y1, preview.x2 - preview.x1, preview.y2 - preview.y1);
+      ctx.setLineDash([]);
+    }
+  }
+
+  function _drawZone(ctx, z, selected) {
+    const corners = _zCorners(z);
+    ctx.beginPath();
+    ctx.moveTo(corners[0].x, corners[0].y);
+    corners.slice(1).forEach(c => ctx.lineTo(c.x, c.y));
+    ctx.closePath();
+    ctx.fillStyle   = selected ? 'rgba(239,68,68,0.45)' : 'rgba(239,68,68,0.32)';
+    ctx.strokeStyle = selected ? '#ef4444' : '#f87171';
+    ctx.lineWidth   = selected ? 2 : 1.5;
+    ctx.fill();
+    ctx.stroke();
+
+    if (!selected) return;
+
+    // Rotation handle line (top edge → handle)
+    const edges = _zEdges(z);
+    const nEdge = edges.find(e => e.name === 'n');
+    const rh = _zRotHandle(z);
+    ctx.beginPath();
+    ctx.moveTo(nEdge.x, nEdge.y);
+    ctx.lineTo(rh.x, rh.y);
+    ctx.strokeStyle = '#94a3b8';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Resize handles (corners + edges)
+    for (const h of [...corners, ...edges]) {
+      ctx.beginPath();
+      ctx.arc(h.x, h.y, HANDLE_R, 0, Math.PI * 2);
+      ctx.fillStyle   = '#fff';
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth   = 1.5;
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Rotation handle (blue filled circle)
+    ctx.beginPath();
+    ctx.arc(rh.x, rh.y, HANDLE_R, 0, Math.PI * 2);
+    ctx.fillStyle   = '#3b82f6';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth   = 1.5;
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // ── Zone editor control ──────────────────────────────────────────────────────
 
   async function _loadZones(cameraId) {
     try {
       const cams = await fetch('/api/cameras').then(r => r.json());
       const cam = cams.find(c => c.id === cameraId);
-      _zones = (cam && cam.exclusion_zones) ? JSON.parse(cam.exclusion_zones) : [];
+      const raw = (cam && cam.exclusion_zones) ? JSON.parse(cam.exclusion_zones) : [];
+      // Migrate old [x1,y1,x2,y2] arrays to new {cx,cy,w,h,angle} objects
+      _zones = raw.map(z => Array.isArray(z)
+        ? { cx: (z[0]+z[2])/2, cy: (z[1]+z[3])/2, w: z[2]-z[0], h: z[3]-z[1], angle: 0 }
+        : z
+      );
     } catch { _zones = []; }
-    _renderZoneCanvas();
+    _selectedIdx = -1;
+    if (_zoneCanvas && _zoneEditing) _drawZoneCanvas();
   }
 
   function _toggleZoneEditor() {
     _zoneEditing = !_zoneEditing;
-    const canvas = document.getElementById('scamZoneCanvas');
-    const clearBtn = _listEl.querySelector('.scam-zone-clear');
-    const saveBtn  = _listEl.querySelector('.scam-zone-save');
-    const zoneBtn  = _listEl.querySelector('.scam-zone-btn');
-    if (!canvas) return;
+    const container = document.getElementById('scamZoneCanvas');
+    const clearBtn  = _listEl.querySelector('.scam-zone-clear');
+    const saveBtn   = _listEl.querySelector('.scam-zone-save');
+    const zoneBtn   = _listEl.querySelector('.scam-zone-btn');
+    if (!container) return;
 
     if (_zoneEditing) {
-      canvas.style.display = '';
+      container.style.display = '';
       if (clearBtn) clearBtn.style.display = '';
       if (saveBtn)  saveBtn.style.display  = '';
       if (zoneBtn)  zoneBtn.textContent = '✏️ Done Editing';
-      _buildZoneCanvas(canvas);
+      _buildZoneCanvas(container);
     } else {
-      canvas.style.display = 'none';
+      _selectedIdx = -1;
+      _zoneCanvas  = null;
+      container.style.display = 'none';
       if (clearBtn) clearBtn.style.display = 'none';
       if (saveBtn)  saveBtn.style.display  = 'none';
       if (zoneBtn)  zoneBtn.textContent = '🎯 Exclusion Zones';
@@ -453,90 +744,48 @@ const SidebarCameras = (() => {
 
   function _buildZoneCanvas(container) {
     container.innerHTML = '';
+    _selectedIdx   = -1;
+    _zoneDragMode  = null;
+    _bgImage       = null;
+
     const wrap = document.getElementById('scamImageWrap');
-    if (!wrap) return;
-    const w = wrap.clientWidth || 260;
-    const h = Math.round(w * 9 / 16);
+    const cw   = (wrap ? wrap.clientWidth : 0) || 260;
+    const ch   = Math.round(cw * 9 / 16);
+    _zoneCW = cw; _zoneCH = ch;
 
     const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
-    canvas.style.cursor = 'crosshair';
+    canvas.width  = cw;
+    canvas.height = ch;
+    canvas.style.cssText = `width:${cw}px;height:${ch}px;cursor:crosshair;display:block;`;
     container.appendChild(canvas);
+    _zoneCanvas = canvas;
 
     const hint = document.createElement('p');
-    hint.className = 'scam-zone-hint';
-    hint.textContent = 'Click and drag to draw exclusion zones. Detected objects inside blacked-out areas will be ignored.';
+    hint.className   = 'scam-zone-hint';
+    hint.textContent = 'Drag empty space to draw · click zone to select · drag handles to resize · blue circle to rotate · Delete to remove';
     container.appendChild(hint);
 
-    _drawZones(canvas);
-
-    let startX, startY;
-    canvas.addEventListener('mousedown', e => {
-      const r = canvas.getBoundingClientRect();
-      startX = (e.clientX - r.left) / w;
-      startY = (e.clientY - r.top) / h;
-    });
-    canvas.addEventListener('mousemove', e => {
-      if (startX === undefined) return;
-      const r = canvas.getBoundingClientRect();
-      const cx = (e.clientX - r.left) / w;
-      const cy = (e.clientY - r.top) / h;
-      _drawZones(canvas, [Math.min(startX,cx), Math.min(startY,cy), Math.max(startX,cx), Math.max(startY,cy)]);
-    });
-    canvas.addEventListener('mouseup', e => {
-      if (startX === undefined) return;
-      const r = canvas.getBoundingClientRect();
-      const cx = (e.clientX - r.left) / w;
-      const cy = (e.clientY - r.top) / h;
-      const x1 = Math.min(startX, cx), y1 = Math.min(startY, cy);
-      const x2 = Math.max(startX, cx), y2 = Math.max(startY, cy);
-      if (x2 - x1 > 0.02 && y2 - y1 > 0.02) {
-        _zones.push([x1, y1, x2, y2]);
-      }
-      startX = undefined;
-      _drawZones(canvas);
-    });
-  }
-
-  function _drawZones(canvas, preview = null) {
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    // Background hint
-    ctx.fillStyle = 'rgba(0,0,0,0.15)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    // Saved zones
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.45)';
-    ctx.strokeStyle = '#ef4444';
-    ctx.lineWidth = 1.5;
-    for (const [x1, y1, x2, y2] of _zones) {
-      const px = x1 * canvas.width, py = y1 * canvas.height;
-      const pw = (x2 - x1) * canvas.width, ph = (y2 - y1) * canvas.height;
-      ctx.fillRect(px, py, pw, ph);
-      ctx.strokeRect(px, py, pw, ph);
+    // Load camera image as background
+    const imgEl = document.getElementById('scamDetailImg');
+    if (imgEl && imgEl.src && !imgEl.src.endsWith('/')) {
+      const bg = new Image();
+      bg.onload  = () => { _bgImage = bg; _drawZoneCanvas(); };
+      bg.onerror = () => _drawZoneCanvas();
+      bg.src = imgEl.src;
+    } else {
+      _drawZoneCanvas();
     }
-    // Preview rect
-    if (preview) {
-      const [x1, y1, x2, y2] = preview;
-      ctx.fillStyle = 'rgba(239, 68, 68, 0.3)';
-      ctx.strokeStyle = '#fca5a5';
-      ctx.fillRect(x1*canvas.width, y1*canvas.height, (x2-x1)*canvas.width, (y2-y1)*canvas.height);
-      ctx.strokeRect(x1*canvas.width, y1*canvas.height, (x2-x1)*canvas.width, (y2-y1)*canvas.height);
-    }
-  }
 
-  function _renderZoneCanvas() {
-    const canvas = document.getElementById('scamZoneCanvas');
-    if (canvas && _zoneEditing) {
-      const cvs = canvas.querySelector('canvas');
-      if (cvs) _drawZones(cvs);
-    }
+    canvas.addEventListener('mousedown', _onZDown);
+    canvas.addEventListener('mousemove', _onZMove);
+    canvas.addEventListener('mouseup',   _onZUp);
+    canvas.addEventListener('mouseleave', _onZLeave);
   }
 
   function _clearZones() {
     _zones = [];
-    const cvs = document.querySelector('#scamZoneCanvas canvas');
-    if (cvs) _drawZones(cvs);
+    _selectedIdx = -1;
+    _drawZoneCanvas();
   }
 
   async function _saveZones() {
@@ -551,7 +800,7 @@ const SidebarCameras = (() => {
       });
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Saved ✓'; }
       setTimeout(() => { if (saveBtn) saveBtn.textContent = 'Save'; }, 2000);
-    } catch (err) {
+    } catch {
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Error'; }
     }
   }

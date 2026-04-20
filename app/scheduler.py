@@ -149,6 +149,8 @@ def snapshot_job() -> None:
                     imgsz=imgsz, exclusion_zones=zones,
                 )
                 elapsed_ms = round((time.monotonic() - t0) * 1000)
+                if zones:
+                    annotated_img = detection.draw_zone_overlay(annotated_img, zones)
                 ann_path = _save_image(
                     cam["id"], annotated_img, captured_at,
                     subdir=f"annotated/{_model_slug(model_name)}",
@@ -224,6 +226,8 @@ def backfill_job(model_name: str, generation: int = 0) -> None:
                 imgsz=imgsz, exclusion_zones=cam_zones[cam_id],
             )
             elapsed_ms = round((time.monotonic() - t0) * 1000)
+            if cam_zones[cam_id]:
+                annotated_img = detection.draw_zone_overlay(annotated_img, cam_zones[cam_id])
             ann_path = _save_image(
                 cam_id, annotated_img, snap["captured_at"],
                 subdir=f"annotated/{_model_slug(model_name)}",
