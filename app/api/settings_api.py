@@ -109,22 +109,27 @@ def update_model_config(model_name: str, body: ModelConfigUpdate):
         database.set_default_model(model_name)
         cfg = settings.load()
         cfg["detection_model"] = model_name
+        model_active = cfg.get("model_active", {})
+        model_active[model_name] = True
+        cfg["model_active"] = model_active
         settings.save(cfg)
-        # Trigger backfill for new default if it has unprocessed snapshots
         scheduler.trigger_backfill([model_name])
         return {"ok": True, "model_name": model_name, "set_default": True}
 
     if body.is_active is not None:
         active = bool(body.is_active)
-        # Cannot deactivate the default model
         default = database.get_default_model()
         if not active and model_name == default:
             raise HTTPException(400, "Cannot deactivate the default model")
         if active and not model_manager.is_available(model_name):
             raise HTTPException(400, "Cannot activate unavailable model — download it first")
         database.set_model_active(model_name, active)
+        cfg = settings.load()
+        model_active = cfg.get("model_active", {})
+        model_active[model_name] = active
+        cfg["model_active"] = model_active
+        settings.save(cfg)
         if active:
-            # Backfill unprocessed snapshots for this newly active model
             scheduler.trigger_backfill([model_name])
         return {"ok": True, "model_name": model_name, "is_active": active}
 

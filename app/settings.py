@@ -13,6 +13,18 @@ DEFAULTS = {
     "detection_model": "yolov8n.pt",
     "detection_confidence_threshold": 0.4,
     "detection_imgsz": 800,
+    "model_active": {
+        "yolov8n.pt": True,
+        "yolov8s.pt": False,
+        "yolov8m.pt": False,
+        "yolov8l.pt": False,
+        "yolo11n.pt": False,
+        "yolo11s.pt": False,
+        "yolo11m.pt": False,
+        "yolo11l.pt": False,
+        "rtdetr-l.pt": False,
+        "rtdetr-x.pt": False,
+    },
 }
 
 
