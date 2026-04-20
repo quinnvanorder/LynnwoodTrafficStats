@@ -5,7 +5,7 @@ from pathlib import Path
 CONFIG_PATH = Path(os.environ.get("CONFIG_DIR", "/config")) / "settings.json"
 
 DEFAULTS = {
-    "snapshot_interval_seconds": 300,
+    "snapshot_interval_seconds": 30,
     "image_retention_count": 1000,
     "static_export_interval_seconds": 600,
     "git_repo_url": "",

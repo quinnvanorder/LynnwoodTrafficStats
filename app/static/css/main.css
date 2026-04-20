@@ -266,3 +266,4 @@ pre#publicKeyDisplay {
 .model-status-cell.ok { color: #86efac; }
 .model-status-cell.downloading { color: #fbbf24; }
 .model-status-cell.error { color: #f87171; }
+.model-loading-cell { color: var(--text-muted); font-style: italic; text-align: center; padding: 12px; }
