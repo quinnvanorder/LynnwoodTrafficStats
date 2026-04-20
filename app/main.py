@@ -29,13 +29,23 @@ async def lifespan(app: FastAPI):
     from . import sse
     sse.set_loop(asyncio.get_event_loop())
 
+    # Sync model_configs with available models; set default if not already set
+    configured_model = cfg["detection_model"]
+    default_model = database.get_default_model()
+    if default_model is None:
+        database.set_default_model(configured_model)
+        logger.info("Initialized default model: %s", configured_model)
+
+    # Check for version updates on bundled models and mark available ones in DB
+    threading.Thread(target=model_manager.sync_model_configs, daemon=True).start()
+
+    # Ensure the configured model is available (downloads in background if missing)
+    model_manager.ensure_model_background(configured_model)
+
     scheduler.start(
         snapshot_interval=cfg["snapshot_interval_seconds"],
         export_interval=cfg["static_export_interval_seconds"],
     )
-
-    # Ensure the configured model is available (downloads in background if missing)
-    model_manager.ensure_model_background(cfg["detection_model"])
 
     # Run initial discovery in a background thread if no cameras exist
     cameras_list = database.get_cameras(active_only=False)

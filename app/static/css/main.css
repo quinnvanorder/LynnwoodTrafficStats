@@ -236,10 +236,33 @@ pre#publicKeyDisplay {
 .scam-zone-canvas canvas { display: block; }
 .scam-zone-hint { font-size: 10px; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
 
-/* ── Model switch ── */
-.model-switch-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.model-switch-row select {
-  flex: 1; min-width: 200px; background: var(--surface2); color: var(--text);
-  border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px;
+/* ── Model table ── */
+#modelTableWrap { overflow-x: auto; }
+.model-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
 }
-.model-action-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.model-table th, .model-table td {
+  padding: 6px 8px; text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.model-table th {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--text-muted);
+}
+.model-table td:first-child, .model-table td:nth-child(2) { text-align: center; }
+.model-table th:first-child, .model-table th:nth-child(2) { text-align: center; }
+.model-table tr:last-child td { border-bottom: none; }
+.model-table input[type=checkbox], .model-table input[type=radio] {
+  accent-color: var(--accent); cursor: pointer; width: 15px; height: 15px;
+}
+.model-table input[type=checkbox]:disabled { opacity: 0.4; cursor: default; }
+.model-name-cell { font-weight: 500; }
+.model-type-badge {
+  font-size: 10px; padding: 1px 5px; border-radius: 3px; font-weight: 600;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-muted);
+  white-space: nowrap;
+}
+.model-status-cell { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+.model-status-cell.ok { color: #86efac; }
+.model-status-cell.downloading { color: #fbbf24; }
+.model-status-cell.error { color: #f87171; }

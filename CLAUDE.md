@@ -131,19 +131,34 @@ Stats records are kept **forever**. Only image files have configurable retention
 | added_at  | TEXT    | ISO8601                         |
 
 ### `snapshots`
-| column           | type    | notes                             |
-|------------------|---------|-----------------------------------|
-| id               | INTEGER | PRIMARY KEY                       |
-| camera_id        | INTEGER | FK → cameras.id                   |
-| captured_at      | TEXT    | ISO8601                           |
-| image_path       | TEXT    | Relative path under /data/images/ |
-| person_count     | INTEGER |                                   |
-| bicycle_count    | INTEGER |                                   |
-| motorcycle_count | INTEGER |                                   |
-| car_count        | INTEGER |                                   |
-| bus_count        | INTEGER |                                   |
-| truck_count      | INTEGER |                                   |
-| total_count      | INTEGER |                                   |
+| column           | type    | notes                                          |
+|------------------|---------|------------------------------------------------|
+| id               | INTEGER | PRIMARY KEY                                    |
+| camera_id        | INTEGER | FK → cameras.id                                |
+| captured_at      | TEXT    | ISO8601                                        |
+| image_path       | TEXT    | Relative path under /data/images/              |
+| annotated_path   | TEXT    | Annotated image from default model (compat)    |
+| person_count … total_count | INTEGER | Mirrored from default model's model_counts |
+
+### `model_configs`
+| column              | type    | notes                                        |
+|---------------------|---------|----------------------------------------------|
+| model_name          | TEXT    | PRIMARY KEY (e.g. yolo11s.pt)                |
+| is_active           | INTEGER | 1 = run on every snapshot                    |
+| is_default          | INTEGER | 1 = counts shown on map (only one row = 1)   |
+| downloaded_at       | TEXT    | ISO8601 — when last downloaded               |
+| ultralytics_version | TEXT    | Library version at download time             |
+
+### `model_counts`
+| column           | type    | notes                                          |
+|------------------|---------|------------------------------------------------|
+| id               | INTEGER | PRIMARY KEY                                    |
+| snapshot_id      | INTEGER | FK → snapshots.id                              |
+| model_name       | TEXT    | e.g. yolo11s.pt                                |
+| annotated_path   | TEXT    | images/{cam_id}/annotated/{model_slug}/{ts}.webp |
+| person/bicycle/motorcycle/car/bus/truck/total_count | INTEGER | |
+| processed_at     | TEXT    | ISO8601                                        |
+| UNIQUE(snapshot_id, model_name)                     | — idempotent INSERT OR IGNORE |
 
 ---
 
@@ -325,6 +340,12 @@ LynnwoodTrafficStats/
 | GPS fallback | Nominatim | Free, no key required; used only when JS extraction fails |
 | Custom cameras | 3-field form | Minimal friction; URL + address + GPS is sufficient |
 | Buses category | Included | COCO-native; relevant for Lynnwood transit corridors |
+| Multi-model counts | model_counts table (not snapshot columns) | Allows per-model historical data; default model shown on map |
+| Snapshot count columns | Mirrored from default model | Backward compat for CSV/hourly export; get_stats uses model_counts with COALESCE fallback |
+| Annotated path | images/{cam_id}/annotated/{model_slug}/{ts}.webp | Per-model subdirectory prevents collisions |
+| Model weights | All 10 bundled in Docker image | NAS has no internet; update check at startup re-downloads if ultralytics version changed |
+| Backfill | Incremental per-model (INSERT OR IGNORE) | Only processes snapshots not yet in model_counts for that model |
+| Model UI | Table with Active checkbox + Default radio | Active = runs on snapshots; Default = shown on map; default is always forced active |
 
 ---
 

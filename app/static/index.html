@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <link rel="stylesheet" href="css/main.css?v=9" />
+  <link rel="stylesheet" href="css/main.css?v=10" />
 </head>
 <body>
 
@@ -135,32 +135,25 @@
 
     <hr />
 
-    <h3>Detection Model</h3>
-    <p class="hint">Switching models deletes annotated images and reprocesses every snapshot in the background — counts are updated. For traffic cameras, <strong>increasing Input Size to 1280</strong> is often more impactful than switching models, since it helps detect distant/small vehicles.</p>
-    <div class="model-switch-row">
-      <select id="modelSelect">
-        <optgroup label="YOLO11 (recommended — newer, more efficient)">
-          <option value="yolo11n.pt" data-label="YOLO11 Nano — fastest">YOLO11 Nano — fastest</option>
-          <option value="yolo11s.pt" data-label="YOLO11 Small — best balance for NAS">YOLO11 Small — best balance for NAS</option>
-          <option value="yolo11m.pt" data-label="YOLO11 Medium — high accuracy">YOLO11 Medium — high accuracy</option>
-          <option value="yolo11l.pt" data-label="YOLO11 Large — very accurate, slow on CPU">YOLO11 Large — very accurate, slow on CPU</option>
-        </optgroup>
-        <optgroup label="YOLOv8 (proven, widely used)">
-          <option value="yolov8n.pt" data-label="YOLOv8 Nano — fastest">YOLOv8 Nano — fastest</option>
-          <option value="yolov8s.pt" data-label="YOLOv8 Small">YOLOv8 Small</option>
-          <option value="yolov8m.pt" data-label="YOLOv8 Medium">YOLOv8 Medium</option>
-          <option value="yolov8l.pt" data-label="YOLOv8 Large">YOLOv8 Large</option>
-        </optgroup>
-        <optgroup label="RT-DETR (transformer — best at small/occluded objects)">
-          <option value="rtdetr-l.pt" data-label="RT-DETR Large — excellent, GPU recommended">RT-DETR Large — excellent, GPU recommended</option>
-          <option value="rtdetr-x.pt" data-label="RT-DETR X-Large — highest accuracy">RT-DETR X-Large — highest accuracy</option>
-        </optgroup>
-      </select>
-    </div>
-    <div class="model-action-row">
-      <button id="btnDownloadModel" class="btn-secondary" style="display:none">⬇ Download</button>
-      <button id="btnSwitchModel" class="btn-primary" disabled>Switch &amp; Reprocess</button>
-      <span id="modelDownloadStatus" class="hint" style="display:none"></span>
+    <h3>Detection Models</h3>
+    <p class="hint">
+      Check models to run them on every new snapshot. The <strong>Default</strong> model's counts appear on the map.
+      Activating a model triggers a background backfill of any unprocessed snapshots.
+      All models are bundled in the image — no internet required.
+    </p>
+    <div id="modelTableWrap">
+      <table class="model-table" id="modelTable">
+        <thead>
+          <tr>
+            <th title="Run on every snapshot">Active</th>
+            <th title="Counts shown on map">Default</th>
+            <th>Model</th>
+            <th>Type</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="modelTableBody"></tbody>
+      </table>
     </div>
     <div id="backfillStatus" class="hint" style="display:none"></div>
 
@@ -202,11 +195,11 @@
   </div>
 </div>
 
-<script src="js/data.js?v=9"></script>
-<script src="js/map.js?v=9"></script>
-<script src="js/cameras.js?v=9"></script>
-<script src="js/settings.js?v=9"></script>
-<script src="js/realtime.js?v=9"></script>
-<script src="js/app.js?v=9"></script>
+<script src="js/data.js?v=10"></script>
+<script src="js/map.js?v=10"></script>
+<script src="js/cameras.js?v=10"></script>
+<script src="js/settings.js?v=10"></script>
+<script src="js/realtime.js?v=10"></script>
+<script src="js/app.js?v=10"></script>
 </body>
 </html>

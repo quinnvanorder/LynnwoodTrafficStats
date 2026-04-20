@@ -18,7 +18,9 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 IMAGES_DIR = DATA_DIR / "images"
 
 _scheduler: BackgroundScheduler | None = None
-_backfill_status: dict = {"running": False, "done": 0, "total": 0, "error": None}
+
+# Backfill tracking — one entry per model being/last backfilled
+_backfill_statuses: dict[str, dict] = {}
 _backfill_generation: int = 0
 
 
@@ -72,7 +74,8 @@ def _fetch_image(url: str) -> Image.Image | None:
         return None
 
 
-def _save_image(camera_id: int, image: Image.Image, captured_at: str, subdir: str | None = None) -> str | None:
+def _save_image(camera_id: int, image: Image.Image, captured_at: str,
+                subdir: str | None = None) -> str | None:
     try:
         cam_dir = IMAGES_DIR / str(camera_id)
         if subdir:
@@ -87,6 +90,10 @@ def _save_image(camera_id: int, image: Image.Image, captured_at: str, subdir: st
         return None
 
 
+def _model_slug(model_name: str) -> str:
+    return model_name.replace(".pt", "")
+
+
 def _prune_images(camera_id: int, retention_count: int) -> None:
     stale_paths = database.prune_images(camera_id, retention_count)
     for rel_path in stale_paths:
@@ -99,9 +106,18 @@ def _prune_images(camera_id: int, retention_count: int) -> None:
 
 def snapshot_job() -> None:
     cfg = settings.load()
-    model_name = cfg["detection_model"]
     confidence = cfg["detection_confidence_threshold"]
+    imgsz = cfg.get("detection_imgsz", 800)
     retention = cfg["image_retention_count"]
+
+    active_models = database.get_active_models()
+    default_model = database.get_default_model()
+
+    # Fallback: if nothing configured yet, use the settings model
+    if not active_models:
+        active_models = [cfg["detection_model"]]
+    if not default_model:
+        default_model = cfg["detection_model"]
 
     cameras = database.get_cameras(active_only=True)
     if not cameras:
@@ -114,57 +130,79 @@ def snapshot_job() -> None:
         if img is None:
             continue
 
-        zones = database.get_camera_zones(cam["id"])
-        counts, annotated_img = detection.detect(
-            img, model_name=model_name, confidence=confidence,
-            imgsz=cfg.get("detection_imgsz", 640), exclusion_zones=zones,
-        )
-
         captured_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
         image_path = _save_image(cam["id"], img, captured_at)
-        annotated_path = _save_image(cam["id"], annotated_img, captured_at, subdir="annotated")
-        snap_id = database.insert_snapshot(
-            cam["id"], image_path, counts, captured_at, annotated_path=annotated_path
-        )
+
+        # Insert snapshot row first (counts start at zero)
+        snap_id = database.insert_snapshot(cam["id"], image_path, {}, captured_at)
+
+        zones = database.get_camera_zones(cam["id"])
+        default_counts: dict = {}
+        default_ann_path: str | None = None
+
+        for model_name in active_models:
+            try:
+                counts, annotated_img = detection.detect(
+                    img, model_name=model_name, confidence=confidence,
+                    imgsz=imgsz, exclusion_zones=zones,
+                )
+                ann_path = _save_image(
+                    cam["id"], annotated_img, captured_at,
+                    subdir=f"annotated/{_model_slug(model_name)}",
+                )
+                database.insert_model_count(snap_id, model_name, counts, ann_path)
+                if model_name == default_model:
+                    default_counts = counts
+                    default_ann_path = ann_path
+            except Exception as e:
+                logger.warning("Detection failed model=%s cam=%d: %s", model_name, cam["id"], e)
+
+        # Keep snapshot columns in sync with default model for CSV/export backward compat
+        if default_counts:
+            database.update_snapshot_analysis(snap_id, default_counts, default_ann_path)
+
         _prune_images(cam["id"], retention)
 
-        results.append({**counts, "camera_id": cam["id"], "snapshot_id": snap_id,
-                        "captured_at": captured_at})
+        results.append({
+            **default_counts,
+            "camera_id": cam["id"],
+            "snapshot_id": snap_id,
+            "captured_at": captured_at,
+        })
 
     if results:
         sse.broadcast("snapshot", {"snapshots": results})
-        logger.info("Snapshot complete: %d cameras processed", len(results))
+        logger.info("Snapshot complete: %d cameras × %d models", len(results), len(active_models))
 
 
-def backfill_job(model_name: str | None = None, generation: int = 0) -> None:
-    global _backfill_status
+def backfill_job(model_name: str, generation: int = 0) -> None:
+    global _backfill_statuses
 
     from . import model_manager
 
     cfg = settings.load()
-    model = model_name or cfg["detection_model"]
     confidence = cfg["detection_confidence_threshold"]
-    imgsz = cfg.get("detection_imgsz", 640)
+    imgsz = cfg.get("detection_imgsz", 800)
 
-    # Validate model before touching any snapshots
-    if not model_manager.is_available(model):
-        _backfill_status = {
+    if not model_manager.is_available(model_name):
+        _backfill_statuses[model_name] = {
             "running": False, "done": 0, "total": 0,
-            "error": f"Model '{model}' not found — download it from Settings first.",
+            "error": f"Model '{model_name}' not found — download it from Settings first.",
         }
-        logger.error("Backfill aborted: model '%s' not available", model)
+        logger.error("Backfill aborted: model '%s' not available", model_name)
         return
 
-    snapshots = database.get_snapshots_for_backfill()
-    _backfill_status = {"running": True, "done": 0, "total": len(snapshots), "error": None}
-    logger.info("Backfill started: %d snapshots model=%s imgsz=%d", len(snapshots), model, imgsz)
+    snapshots = database.get_snapshots_without_model(model_name)
+    _backfill_statuses[model_name] = {
+        "running": True, "done": 0, "total": len(snapshots), "error": None,
+    }
+    logger.info("Backfill started: %d snapshots model=%s", len(snapshots), model_name)
 
     cam_zones: dict = {}
     for snap in snapshots:
         if _backfill_generation != generation:
             logger.info("Backfill generation %d superseded — stopping", generation)
-            _backfill_status["running"] = False
+            _backfill_statuses[model_name]["running"] = False
             return
 
         cam_id = snap["camera_id"]
@@ -173,27 +211,47 @@ def backfill_job(model_name: str | None = None, generation: int = 0) -> None:
 
         full_path = DATA_DIR / snap["image_path"]
         if not full_path.exists():
-            _backfill_status["done"] += 1
+            _backfill_statuses[model_name]["done"] += 1
             continue
         try:
             img = Image.open(full_path).convert("RGB")
             counts, annotated_img = detection.detect(
-                img, model_name=model, confidence=confidence,
+                img, model_name=model_name, confidence=confidence,
                 imgsz=imgsz, exclusion_zones=cam_zones[cam_id],
             )
-            annotated_path = _save_image(cam_id, annotated_img, snap["captured_at"], subdir="annotated")
-            database.update_snapshot_analysis(snap["id"], counts, annotated_path)
-        except Exception as e:
-            logger.warning("Backfill failed for snapshot %d: %s", snap["id"], e)
-        _backfill_status["done"] += 1
+            ann_path = _save_image(
+                cam_id, annotated_img, snap["captured_at"],
+                subdir=f"annotated/{_model_slug(model_name)}",
+            )
+            database.insert_model_count(snap["id"], model_name, counts, ann_path)
 
-    _backfill_status["running"] = False
-    _backfill_status["error"] = None
-    logger.info("Backfill complete: %d snapshots", len(snapshots))
+            # If this is the default model, also keep snapshot columns current
+            if model_name == database.get_default_model():
+                database.update_snapshot_analysis(snap["id"], counts, ann_path)
+        except Exception as e:
+            logger.warning("Backfill failed snapshot %d model=%s: %s", snap["id"], model_name, e)
+        _backfill_statuses[model_name]["done"] += 1
+
+    _backfill_statuses[model_name]["running"] = False
+    _backfill_statuses[model_name]["error"] = None
+    logger.info("Backfill complete: %d snapshots model=%s", len(snapshots), model_name)
 
 
 def get_backfill_status() -> dict:
-    return dict(_backfill_status)
+    """Return per-model backfill status plus a rolled-up 'any running' flag."""
+    running_any = any(s.get("running") for s in _backfill_statuses.values())
+    done_total = sum(s.get("done", 0) for s in _backfill_statuses.values())
+    total_total = sum(s.get("total", 0) for s in _backfill_statuses.values())
+    errors = [s["error"] for s in _backfill_statuses.values() if s.get("error")]
+
+    # Legacy single-model shape (used by older UI code)
+    legacy: dict = {
+        "running": running_any,
+        "done": done_total,
+        "total": total_total,
+        "error": errors[0] if errors else None,
+    }
+    return {**legacy, "per_model": dict(_backfill_statuses)}
 
 
 def discovery_job() -> None:
@@ -238,16 +296,20 @@ def trigger_snapshot() -> None:
         _scheduler.add_job(snapshot_job, trigger="date", id="snapshot_manual", replace_existing=True)
 
 
-def trigger_backfill(model_name: str | None = None) -> None:
-    global _backfill_generation, _backfill_status
+def trigger_backfill(model_names: list[str]) -> None:
+    """Queue a backfill job for each of the given model names."""
+    global _backfill_generation
     _backfill_generation += 1
     gen = _backfill_generation
-    _backfill_status = {"running": False, "done": 0, "total": 0, "error": None}
-    if _scheduler:
-        _scheduler.add_job(
-            backfill_job, trigger="date", id="backfill_manual",
-            replace_existing=True, kwargs={"model_name": model_name, "generation": gen},
-        )
+
+    for model_name in model_names:
+        _backfill_statuses[model_name] = {"running": False, "done": 0, "total": 0, "error": None}
+        if _scheduler:
+            _scheduler.add_job(
+                backfill_job, trigger="date",
+                id=f"backfill_{model_name}", replace_existing=True,
+                kwargs={"model_name": model_name, "generation": gen},
+            )
 
 
 def trigger_discovery() -> None:

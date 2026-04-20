@@ -1,6 +1,7 @@
 import logging
 import os
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -9,7 +10,6 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 MODELS_DIR = DATA_DIR / "models"
 WEIGHTS_DIR = Path("/app/weights")  # models bundled inside the Docker image
 
-# All models the UI exposes
 ALL_MODELS = [
     "yolov8n.pt",
     "yolov8s.pt",
@@ -26,6 +26,14 @@ ALL_MODELS = [
 # Per-model download state: {name: {"running": bool, "error": str|None}}
 _download_status: dict = {}
 _download_lock = threading.Lock()
+
+
+def get_ultralytics_version() -> str:
+    try:
+        from ultralytics import __version__
+        return __version__
+    except Exception:
+        return "unknown"
 
 
 def find_model(model_name: str) -> Path | None:
@@ -67,8 +75,8 @@ def download_model(model_name: str) -> Path:
     tmp.unlink(missing_ok=True)
 
     try:
-        from ultralytics import __version__ as _yv
-        url = f"https://github.com/ultralytics/assets/releases/download/v{_yv}/{model_name}"
+        uv = get_ultralytics_version()
+        url = f"https://github.com/ultralytics/assets/releases/download/v{uv}/{model_name}"
         logger.info("Downloading %s from %s", model_name, url)
 
         try:
@@ -92,6 +100,19 @@ def download_model(model_name: str) -> Path:
         raise RuntimeError(f"Download failed for '{model_name}': {e}") from e
 
 
+def _record_downloaded(model_name: str) -> None:
+    """Update model_configs to mark this model as downloaded with current version."""
+    try:
+        from . import database
+        database.upsert_model_config(
+            model_name,
+            downloaded_at=datetime.now(timezone.utc).isoformat(),
+            ultralytics_version=get_ultralytics_version(),
+        )
+    except Exception as e:
+        logger.debug("Could not update model_configs for %s: %s", model_name, e)
+
+
 def download_model_async(model_name: str) -> None:
     """Start a background download. Check get_model_status() to track progress."""
     with _download_lock:
@@ -103,11 +124,49 @@ def download_model_async(model_name: str) -> None:
         try:
             download_model(model_name)
             _download_status[model_name] = {"running": False, "error": None}
+            _record_downloaded(model_name)
         except Exception as e:
             _download_status[model_name] = {"running": False, "error": str(e)}
             logger.error("Async download failed for %s: %s", model_name, e)
 
     threading.Thread(target=_run, name=f"dl-{model_name}", daemon=True).start()
+
+
+def sync_model_configs() -> None:
+    """At startup: update model_configs downloaded_at/version for already-available models.
+
+    Also re-download any bundled model if the ultralytics version has changed
+    (so the bundled .pt stays compatible with the installed library version).
+    """
+    from . import database
+    uv = get_ultralytics_version()
+    configs = {c["model_name"]: c for c in database.get_model_configs()}
+
+    for name in ALL_MODELS:
+        path = find_model(name)
+        if path is None:
+            continue
+
+        cfg = configs.get(name, {})
+        stored_ver = cfg.get("ultralytics_version")
+
+        if stored_ver != uv:
+            # Version mismatch — re-download to MODELS_DIR so we get the right weights
+            if path.parent == WEIGHTS_DIR:
+                logger.info(
+                    "Model %s was bundled at ultralytics %s, current is %s — downloading updated weights",
+                    name, stored_ver, uv,
+                )
+                download_model_async(name)
+                continue
+
+        # Mark as downloaded if not already recorded
+        if not cfg.get("downloaded_at"):
+            database.upsert_model_config(
+                name,
+                downloaded_at=datetime.now(timezone.utc).isoformat(),
+                ultralytics_version=uv,
+            )
 
 
 def ensure_model_background(model_name: str) -> None:

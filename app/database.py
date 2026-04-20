@@ -5,6 +5,12 @@ from pathlib import Path
 
 DB_PATH = Path(os.environ.get("DATA_DIR", "/data")) / "traffic.db"
 
+ALL_MODEL_NAMES = [
+    "yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt",
+    "yolo11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt",
+    "rtdetr-l.pt", "rtdetr-x.pt",
+]
+
 
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -59,8 +65,36 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_snapshots_camera_time
                 ON snapshots (camera_id, captured_at);
+
+            CREATE TABLE IF NOT EXISTS model_configs (
+                model_name          TEXT PRIMARY KEY,
+                is_active           INTEGER NOT NULL DEFAULT 0,
+                is_default          INTEGER NOT NULL DEFAULT 0,
+                downloaded_at       TEXT,
+                ultralytics_version TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS model_counts (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id       INTEGER NOT NULL REFERENCES snapshots(id),
+                model_name        TEXT    NOT NULL,
+                annotated_path    TEXT,
+                person_count      INTEGER NOT NULL DEFAULT 0,
+                bicycle_count     INTEGER NOT NULL DEFAULT 0,
+                motorcycle_count  INTEGER NOT NULL DEFAULT 0,
+                car_count         INTEGER NOT NULL DEFAULT 0,
+                bus_count         INTEGER NOT NULL DEFAULT 0,
+                truck_count       INTEGER NOT NULL DEFAULT 0,
+                total_count       INTEGER NOT NULL DEFAULT 0,
+                processed_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(snapshot_id, model_name)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_model_counts_snap
+                ON model_counts (snapshot_id, model_name);
         """)
-        # Migrations
+
+        # Schema migrations
         for stmt in [
             "ALTER TABLE snapshots ADD COLUMN annotated_path TEXT",
             "ALTER TABLE cameras ADD COLUMN exclusion_zones TEXT",
@@ -69,6 +103,109 @@ def init_db() -> None:
                 db.execute(stmt)
             except Exception:
                 pass
+
+        # Populate model_configs with all known models (no-op if already present)
+        for name in ALL_MODEL_NAMES:
+            db.execute(
+                "INSERT OR IGNORE INTO model_configs (model_name) VALUES (?)", (name,)
+            )
+
+
+# ── model_configs ─────────────────────────────────────────────────────────────
+
+def get_model_configs() -> list[dict]:
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT * FROM model_configs ORDER BY model_name"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def upsert_model_config(model_name: str, **kwargs) -> None:
+    """Update one or more fields in model_configs for the given model."""
+    if not kwargs:
+        return
+    sets = ", ".join(f"{k} = ?" for k in kwargs)
+    vals = list(kwargs.values()) + [model_name]
+    with get_db() as db:
+        db.execute(f"UPDATE model_configs SET {sets} WHERE model_name = ?", vals)
+
+
+def set_model_active(model_name: str, active: bool) -> None:
+    with get_db() as db:
+        db.execute(
+            "UPDATE model_configs SET is_active = ? WHERE model_name = ?",
+            (int(active), model_name),
+        )
+
+
+def set_default_model(model_name: str) -> None:
+    """Set exactly one model as default; clear others."""
+    with get_db() as db:
+        db.execute("UPDATE model_configs SET is_default = 0")
+        db.execute(
+            "UPDATE model_configs SET is_default = 1, is_active = 1 WHERE model_name = ?",
+            (model_name,),
+        )
+
+
+def get_active_models() -> list[str]:
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT model_name FROM model_configs WHERE is_active = 1 ORDER BY model_name"
+        ).fetchall()
+        return [r["model_name"] for r in rows]
+
+
+def get_default_model() -> str | None:
+    with get_db() as db:
+        row = db.execute(
+            "SELECT model_name FROM model_configs WHERE is_default = 1 LIMIT 1"
+        ).fetchone()
+        return row["model_name"] if row else None
+
+
+# ── model_counts ──────────────────────────────────────────────────────────────
+
+def insert_model_count(
+    snapshot_id: int,
+    model_name: str,
+    counts: dict,
+    annotated_path: str | None = None,
+) -> None:
+    total = sum(counts.get(k, 0) for k in
+                ("person_count", "bicycle_count", "motorcycle_count",
+                 "car_count", "bus_count", "truck_count"))
+    with get_db() as db:
+        db.execute("""
+            INSERT OR IGNORE INTO model_counts
+                (snapshot_id, model_name, annotated_path,
+                 person_count, bicycle_count, motorcycle_count,
+                 car_count, bus_count, truck_count, total_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            snapshot_id, model_name, annotated_path,
+            counts.get("person_count", 0), counts.get("bicycle_count", 0),
+            counts.get("motorcycle_count", 0), counts.get("car_count", 0),
+            counts.get("bus_count", 0), counts.get("truck_count", 0),
+            total,
+        ))
+
+
+def get_snapshots_without_model(model_name: str) -> list[dict]:
+    """Snapshots with an image_path that haven't been processed by model_name yet."""
+    with get_db() as db:
+        rows = db.execute("""
+            SELECT s.id, s.camera_id, s.image_path, s.captured_at
+            FROM snapshots s
+            WHERE s.image_path IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM model_counts mc
+                  WHERE mc.snapshot_id = s.id AND mc.model_name = ?
+              )
+            ORDER BY s.captured_at
+        """, (model_name,)).fetchall()
+        return [dict(r) for r in rows]
 
 
 # ── cameras ──────────────────────────────────────────────────────────────────
@@ -187,10 +324,18 @@ def get_snapshots(camera_id: int | None = None, start: str | None = None,
         return [dict(r) for r in rows]
 
 
-def get_stats(start: str | None = None, end: str | None = None) -> list[dict]:
-    """Aggregate counts per camera for the given time window."""
+def get_stats(start: str | None = None, end: str | None = None,
+              model_name: str | None = None) -> list[dict]:
+    """Aggregate counts per camera for the given time window.
+
+    Uses model_counts for the specified model if available, falling back
+    to snapshots columns for rows not yet processed by that model.
+    """
+    if model_name is None:
+        model_name = get_default_model()
+
     join_cond = "s.camera_id = c.id"
-    params = []
+    params: list = []
     if start:
         join_cond += " AND s.captured_at >= ?"
         params.append(start)
@@ -198,59 +343,104 @@ def get_stats(start: str | None = None, end: str | None = None) -> list[dict]:
         join_cond += " AND s.captured_at <= ?"
         params.append(end)
 
+    # If we have a default model, use model_counts with fallback to snapshot columns.
+    # COALESCE(mc.col, s.col) means: use model_counts if the row exists, else snapshots.
+    if model_name:
+        params.append(model_name)
+        count_cols = """
+            COALESCE(SUM(COALESCE(mc.person_count,     s.person_count)),     0) AS person_count,
+            COALESCE(SUM(COALESCE(mc.bicycle_count,    s.bicycle_count)),    0) AS bicycle_count,
+            COALESCE(SUM(COALESCE(mc.motorcycle_count, s.motorcycle_count)), 0) AS motorcycle_count,
+            COALESCE(SUM(COALESCE(mc.car_count,        s.car_count)),        0) AS car_count,
+            COALESCE(SUM(COALESCE(mc.bus_count,        s.bus_count)),        0) AS bus_count,
+            COALESCE(SUM(COALESCE(mc.truck_count,      s.truck_count)),      0) AS truck_count,
+            COALESCE(SUM(COALESCE(mc.total_count,      s.total_count)),      0) AS total_count,
+            COUNT(s.id) AS snapshot_count
+        """
+        model_join = "LEFT JOIN model_counts mc ON mc.snapshot_id = s.id AND mc.model_name = ?"
+    else:
+        count_cols = """
+            COALESCE(SUM(s.person_count),     0) AS person_count,
+            COALESCE(SUM(s.bicycle_count),    0) AS bicycle_count,
+            COALESCE(SUM(s.motorcycle_count), 0) AS motorcycle_count,
+            COALESCE(SUM(s.car_count),        0) AS car_count,
+            COALESCE(SUM(s.bus_count),        0) AS bus_count,
+            COALESCE(SUM(s.truck_count),      0) AS truck_count,
+            COALESCE(SUM(s.total_count),      0) AS total_count,
+            COUNT(s.id) AS snapshot_count
+        """
+        model_join = ""
+
     with get_db() as db:
         rows = db.execute(f"""
-            SELECT
-                c.id, c.address, c.lat, c.lon, c.url,
-                COALESCE(SUM(s.person_count), 0)     AS person_count,
-                COALESCE(SUM(s.bicycle_count), 0)    AS bicycle_count,
-                COALESCE(SUM(s.motorcycle_count), 0) AS motorcycle_count,
-                COALESCE(SUM(s.car_count), 0)        AS car_count,
-                COALESCE(SUM(s.bus_count), 0)        AS bus_count,
-                COALESCE(SUM(s.truck_count), 0)      AS truck_count,
-                COALESCE(SUM(s.total_count), 0)      AS total_count,
-                COUNT(s.id)                          AS snapshot_count
+            SELECT c.id, c.address, c.lat, c.lon, c.url,
+                   {count_cols}
             FROM cameras c
             LEFT JOIN snapshots s ON {join_cond}
+            {model_join}
             GROUP BY c.id
             ORDER BY c.address
         """, params).fetchall()
         return [dict(r) for r in rows]
 
 
-def get_hourly_aggregates(start: str | None = None, end: str | None = None) -> list[dict]:
+def get_hourly_aggregates(start: str | None = None, end: str | None = None,
+                          model_name: str | None = None) -> list[dict]:
     """Hourly bucket aggregates for static site export."""
+    if model_name is None:
+        model_name = get_default_model()
+
     conditions, params = [], []
     if start:
-        conditions.append("captured_at >= ?")
+        conditions.append("s.captured_at >= ?")
         params.append(start)
     if end:
-        conditions.append("captured_at <= ?")
+        conditions.append("s.captured_at <= ?")
         params.append(end)
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    if model_name:
+        params.append(model_name)
+        model_join = "LEFT JOIN model_counts mc ON mc.snapshot_id = s.id AND mc.model_name = ?"
+        count_cols = """
+            SUM(COALESCE(mc.person_count,     s.person_count))     AS person_count,
+            SUM(COALESCE(mc.bicycle_count,    s.bicycle_count))    AS bicycle_count,
+            SUM(COALESCE(mc.motorcycle_count, s.motorcycle_count)) AS motorcycle_count,
+            SUM(COALESCE(mc.car_count,        s.car_count))        AS car_count,
+            SUM(COALESCE(mc.bus_count,        s.bus_count))        AS bus_count,
+            SUM(COALESCE(mc.truck_count,      s.truck_count))      AS truck_count,
+            SUM(COALESCE(mc.total_count,      s.total_count))      AS total_count
+        """
+    else:
+        model_join = ""
+        count_cols = """
+            SUM(s.person_count)     AS person_count,
+            SUM(s.bicycle_count)    AS bicycle_count,
+            SUM(s.motorcycle_count) AS motorcycle_count,
+            SUM(s.car_count)        AS car_count,
+            SUM(s.bus_count)        AS bus_count,
+            SUM(s.truck_count)      AS truck_count,
+            SUM(s.total_count)      AS total_count
+        """
+
     with get_db() as db:
         rows = db.execute(f"""
             SELECT
-                camera_id,
-                strftime('%Y-%m-%dT%H:00:00', captured_at) AS hour,
-                SUM(person_count)     AS person_count,
-                SUM(bicycle_count)    AS bicycle_count,
-                SUM(motorcycle_count) AS motorcycle_count,
-                SUM(car_count)        AS car_count,
-                SUM(bus_count)        AS bus_count,
-                SUM(truck_count)      AS truck_count,
-                SUM(total_count)      AS total_count
-            FROM snapshots
+                s.camera_id,
+                strftime('%Y-%m-%dT%H:00:00', s.captured_at) AS hour,
+                {count_cols}
+            FROM snapshots s
+            {model_join}
             {where}
-            GROUP BY camera_id, hour
+            GROUP BY s.camera_id, hour
             ORDER BY hour
         """, params).fetchall()
         return [dict(r) for r in rows]
 
 
 def prune_images(camera_id: int, retention_count: int) -> list[str]:
-    """Return all image paths for snapshots beyond retention_count for this camera."""
+    """Return all image/annotated paths for snapshots beyond retention_count for this camera."""
     with get_db() as db:
         rows = db.execute("""
             SELECT id, image_path, annotated_path FROM snapshots
@@ -265,10 +455,19 @@ def prune_images(camera_id: int, retention_count: int) -> list[str]:
                 paths.append(r["image_path"])
             if r["annotated_path"]:
                 paths.append(r["annotated_path"])
+
         if ids:
+            # Also collect model_counts annotated paths for these snapshots
+            ph = ",".join("?" * len(ids))
+            mc_rows = db.execute(
+                f"SELECT annotated_path FROM model_counts WHERE snapshot_id IN ({ph}) AND annotated_path IS NOT NULL",
+                ids,
+            ).fetchall()
+            paths.extend(r["annotated_path"] for r in mc_rows)
+            db.execute(f"DELETE FROM model_counts WHERE snapshot_id IN ({ph})", ids)
             db.execute(
                 f"UPDATE snapshots SET image_path = NULL, annotated_path = NULL"
-                f" WHERE id IN ({','.join('?'*len(ids))})",
+                f" WHERE id IN ({ph})",
                 ids,
             )
         return paths
@@ -316,28 +515,51 @@ def update_snapshot_analysis(snap_id: int, counts: dict, annotated_path: str | N
 
 
 def clear_annotated_paths() -> list[str]:
-    """Null all annotated_path values and return the paths so callers can delete the files."""
+    """Null all annotated_path values and return paths for file deletion."""
     with get_db() as db:
         rows = db.execute(
             "SELECT annotated_path FROM snapshots WHERE annotated_path IS NOT NULL"
         ).fetchall()
-        paths = [r["annotated_path"] for r in rows]
+        mc_rows = db.execute(
+            "SELECT annotated_path FROM model_counts WHERE annotated_path IS NOT NULL"
+        ).fetchall()
+        paths = [r["annotated_path"] for r in rows] + [r["annotated_path"] for r in mc_rows]
         db.execute("UPDATE snapshots SET annotated_path = NULL")
+        db.execute("UPDATE model_counts SET annotated_path = NULL")
         return paths
 
 
 def export_csv() -> str:
-    """Return full CSV string of snapshots joined with cameras."""
-    with get_db() as db:
-        rows = db.execute("""
-            SELECT
-                s.captured_at, c.url AS camera_url, c.address, c.lat, c.lon,
-                s.person_count, s.bicycle_count, s.motorcycle_count,
-                s.car_count, s.bus_count, s.truck_count, s.total_count
-            FROM snapshots s
-            JOIN cameras c ON c.id = s.camera_id
-            ORDER BY s.captured_at DESC
-        """).fetchall()
+    """Return full CSV string of snapshots joined with cameras, using default model counts."""
+    default = get_default_model()
+    if default:
+        with get_db() as db:
+            rows = db.execute("""
+                SELECT
+                    s.captured_at, c.url AS camera_url, c.address, c.lat, c.lon,
+                    COALESCE(mc.person_count,     s.person_count)     AS person_count,
+                    COALESCE(mc.bicycle_count,    s.bicycle_count)    AS bicycle_count,
+                    COALESCE(mc.motorcycle_count, s.motorcycle_count) AS motorcycle_count,
+                    COALESCE(mc.car_count,        s.car_count)        AS car_count,
+                    COALESCE(mc.bus_count,        s.bus_count)        AS bus_count,
+                    COALESCE(mc.truck_count,      s.truck_count)      AS truck_count,
+                    COALESCE(mc.total_count,      s.total_count)      AS total_count
+                FROM snapshots s
+                JOIN cameras c ON c.id = s.camera_id
+                LEFT JOIN model_counts mc ON mc.snapshot_id = s.id AND mc.model_name = ?
+                ORDER BY s.captured_at DESC
+            """, (default,)).fetchall()
+    else:
+        with get_db() as db:
+            rows = db.execute("""
+                SELECT
+                    s.captured_at, c.url AS camera_url, c.address, c.lat, c.lon,
+                    s.person_count, s.bicycle_count, s.motorcycle_count,
+                    s.car_count, s.bus_count, s.truck_count, s.total_count
+                FROM snapshots s
+                JOIN cameras c ON c.id = s.camera_id
+                ORDER BY s.captured_at DESC
+            """).fetchall()
 
     header = "timestamp,camera_url,address,lat,lon,person_count,bicycle_count,motorcycle_count,car_count,bus_count,truck_count,total_count\n"
     lines = [

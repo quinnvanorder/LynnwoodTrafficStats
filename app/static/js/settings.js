@@ -3,14 +3,30 @@
 const SettingsManager = (() => {
   let _initialized = false;
   let _pollIntervalId = null;
-  let _modelStatusPollId = null;
+  let _modelPollId = null;
 
-  // Fields managed by the settings form (detection_model is owned by the model switcher)
   const FORM_FIELDS = [
     'snapshot_interval_seconds', 'image_retention_count',
     'static_export_interval_seconds', 'git_repo_url', 'git_remote_branch',
     'detection_confidence_threshold', 'detection_imgsz',
   ];
+
+  // ── Model metadata ──────────────────────────────────────────────────────────
+
+  const MODEL_META = {
+    'yolov8n.pt':  { label: 'YOLOv8 Nano',    type: 'YOLOv8',   size: 'nano'   },
+    'yolov8s.pt':  { label: 'YOLOv8 Small',   type: 'YOLOv8',   size: 'small'  },
+    'yolov8m.pt':  { label: 'YOLOv8 Medium',  type: 'YOLOv8',   size: 'medium' },
+    'yolov8l.pt':  { label: 'YOLOv8 Large',   type: 'YOLOv8',   size: 'large'  },
+    'yolo11n.pt':  { label: 'YOLO11 Nano',    type: 'YOLO11',   size: 'nano'   },
+    'yolo11s.pt':  { label: 'YOLO11 Small',   type: 'YOLO11',   size: 'small'  },
+    'yolo11m.pt':  { label: 'YOLO11 Medium',  type: 'YOLO11',   size: 'medium' },
+    'yolo11l.pt':  { label: 'YOLO11 Large',   type: 'YOLO11',   size: 'large'  },
+    'rtdetr-l.pt': { label: 'RT-DETR Large',  type: 'RT-DETR',  size: 'large'  },
+    'rtdetr-x.pt': { label: 'RT-DETR X-Large',type: 'RT-DETR',  size: 'xlarge' },
+  };
+
+  // ── Settings form ───────────────────────────────────────────────────────────
 
   async function load() {
     const cfg = await Data.loadSettings();
@@ -19,101 +35,122 @@ const SettingsManager = (() => {
       const el = form.elements[key];
       if (el) el.value = cfg[key] ?? '';
     }
-    // Sync model dropdown to current configured model
-    const modelSelect = document.getElementById('modelSelect');
-    if (modelSelect && cfg.detection_model) {
-      if ([...modelSelect.options].some(o => o.value === cfg.detection_model)) {
-        modelSelect.value = cfg.detection_model;
-      }
-    }
-    _refreshModelStatus();
+    _refreshModelTable();
     _checkBackfillStatus();
   }
 
-  // ── Model status ────────────────────────────────────────────────────────────
+  // ── Model table ─────────────────────────────────────────────────────────────
 
-  async function _refreshModelStatus() {
+  async function _refreshModelTable() {
     try {
-      const status = await fetch('/api/settings/model-status').then(r => r.json());
-      _applyModelStatus(status);
-    } catch { /* server may be starting up */ }
+      const configs = await fetch('/api/settings/model-configs').then(r => r.json());
+      _renderModelTable(configs);
+      const anyDownloading = configs.some(c => c.downloading);
+      if (anyDownloading && !_modelPollId) {
+        _modelPollId = setInterval(async () => {
+          try {
+            const c2 = await fetch('/api/settings/model-configs').then(r => r.json());
+            _renderModelTable(c2);
+            if (!c2.some(c => c.downloading)) {
+              clearInterval(_modelPollId); _modelPollId = null;
+            }
+          } catch { clearInterval(_modelPollId); _modelPollId = null; }
+        }, 2000);
+      }
+    } catch { /* server may be starting */ }
   }
 
-  function _applyModelStatus(status) {
-    const modelSelect = document.getElementById('modelSelect');
-    const dlBtn   = document.getElementById('btnDownloadModel');
-    const swBtn   = document.getElementById('btnSwitchModel');
-    const dlStatus = document.getElementById('modelDownloadStatus');
-    if (!modelSelect) return;
+  function _renderModelTable(configs) {
+    const tbody = document.getElementById('modelTableBody');
+    if (!tbody) return;
 
-    // Update option text to show availability
-    for (const opt of modelSelect.options) {
-      const s = status[opt.value];
-      if (!s) continue;
-      const base = opt.dataset.label || (opt.dataset.label = opt.text.replace(/ [✓⬇⟳].*$/, '').trim());
-      if (s.downloading) {
-        opt.text = `${base} ⟳ downloading…`;
-      } else if (s.available) {
-        opt.text = `${base} ✓`;
-      } else {
-        opt.text = `${base} (not downloaded)`;
+    tbody.innerHTML = configs.map(c => {
+      const meta = MODEL_META[c.model_name] || { label: c.model_name, type: '?', size: '?' };
+      const statusClass = c.downloading ? 'downloading' : c.available ? 'ok' : '';
+      const statusText  = c.downloading ? '⟳ downloading…'
+                        : c.available   ? '✓ ready'
+                        : c.error       ? '✗ ' + c.error
+                        : '— not downloaded';
+      const isDefault = c.is_default;
+      const isActive  = c.is_active;
+
+      return `
+        <tr data-model="${c.model_name}">
+          <td>
+            <input type="checkbox" class="model-active-cb"
+              data-model="${c.model_name}"
+              ${isActive ? 'checked' : ''}
+              ${isDefault ? 'disabled title="Default model is always active"' : ''}
+              ${!c.available ? 'disabled title="Download this model first"' : ''}
+            />
+          </td>
+          <td>
+            <input type="radio" name="modelDefault"
+              class="model-default-rb"
+              data-model="${c.model_name}"
+              ${isDefault ? 'checked' : ''}
+              ${!c.available ? 'disabled title="Download this model first"' : ''}
+            />
+          </td>
+          <td class="model-name-cell">${meta.label}</td>
+          <td><span class="model-type-badge">${meta.type}</span></td>
+          <td class="model-status-cell ${statusClass}">${statusText}</td>
+        </tr>
+      `;
+    }).join('');
+
+    // Attach listeners after render
+    tbody.querySelectorAll('.model-active-cb').forEach(cb => {
+      cb.addEventListener('change', _onActiveChange);
+    });
+    tbody.querySelectorAll('.model-default-rb').forEach(rb => {
+      rb.addEventListener('change', _onDefaultChange);
+    });
+  }
+
+  async function _onActiveChange(e) {
+    const model = e.target.dataset.model;
+    const active = e.target.checked;
+    try {
+      const res = await fetch(`/api/settings/model-configs/${model}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: active }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        _toast(`Error: ${err.detail || 'Unknown error'}`, true);
+        e.target.checked = !active; // revert
+        return;
       }
-    }
-
-    // Update buttons based on currently selected model
-    _updateModelButtons(status);
-
-    // If any model is downloading, keep polling
-    const anyDownloading = Object.values(status).some(s => s.downloading);
-    if (anyDownloading && !_modelStatusPollId) {
-      _modelStatusPollId = setInterval(async () => {
-        try {
-          const s = await fetch('/api/settings/model-status').then(r => r.json());
-          _applyModelStatus(s);
-          if (!Object.values(s).some(x => x.downloading)) {
-            clearInterval(_modelStatusPollId);
-            _modelStatusPollId = null;
-          }
-        } catch { clearInterval(_modelStatusPollId); _modelStatusPollId = null; }
-      }, 2000);
+      _toast(active ? `${model} activated — backfilling…` : `${model} deactivated`);
+      if (active) _startBackfillPoll(document.getElementById('backfillStatus'));
+    } catch {
+      _toast('Request failed', true);
+      e.target.checked = !active;
     }
   }
 
-  function _updateModelButtons(status) {
-    const modelSelect  = document.getElementById('modelSelect');
-    const dlBtn        = document.getElementById('btnDownloadModel');
-    const swBtn        = document.getElementById('btnSwitchModel');
-    const dlStatus     = document.getElementById('modelDownloadStatus');
-    if (!modelSelect || !dlBtn || !swBtn) return;
-
-    const selected = modelSelect.value;
-    const s = status ? status[selected] : null;
-    const available    = s?.available   ?? false;
-    const downloading  = s?.downloading ?? false;
-    const error        = s?.error;
-
-    dlBtn.style.display = available ? 'none' : '';
-    swBtn.disabled = !available;
-    swBtn.title = available ? '' : 'Download the model first';
-
-    if (downloading) {
-      dlBtn.disabled = true;
-      dlBtn.textContent = '⟳ Downloading…';
-    } else {
-      dlBtn.disabled = false;
-      dlBtn.textContent = '⬇ Download';
-    }
-
-    if (dlStatus) {
-      if (error) {
-        dlStatus.textContent = `Download failed: ${error}`;
-        dlStatus.style.display = '';
-      } else if (!available && !downloading) {
-        dlStatus.textContent = 'This model is not downloaded yet.';
-        dlStatus.style.display = '';
-      } else {
-        dlStatus.style.display = 'none';
+  async function _onDefaultChange(e) {
+    const model = e.target.dataset.model;
+    try {
+      const res = await fetch(`/api/settings/model-configs/${model}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_default: true }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        _toast(`Error: ${err.detail || 'Unknown error'}`, true);
+        _refreshModelTable(); // revert UI
+        return;
       }
+      _toast(`Default model set to ${model}`);
+      _refreshModelTable();
+      _startBackfillPoll(document.getElementById('backfillStatus'));
+    } catch {
+      _toast('Request failed', true);
+      _refreshModelTable();
     }
   }
 
@@ -129,7 +166,7 @@ const SettingsManager = (() => {
         statusEl.textContent = `Backfill error: ${s.error}`;
       } else if (s.running) {
         statusEl.style.display = '';
-        statusEl.textContent = `Backfill: ${s.done} / ${s.total} snapshots reprocessed`;
+        statusEl.textContent = _backfillText(s);
         if (!_pollIntervalId) _startBackfillPoll(statusEl);
       } else if (s.total > 0) {
         statusEl.style.display = '';
@@ -138,20 +175,30 @@ const SettingsManager = (() => {
     } catch { /* ok */ }
   }
 
+  function _backfillText(s) {
+    const parts = Object.entries(s.per_model || {})
+      .filter(([, v]) => v.running)
+      .map(([m, v]) => `${m}: ${v.done}/${v.total}`);
+    return parts.length
+      ? `Backfill: ${parts.join(' · ')}`
+      : `Backfill: ${s.done} / ${s.total} snapshots`;
+  }
+
   function _startBackfillPoll(statusEl) {
     if (_pollIntervalId) clearInterval(_pollIntervalId);
+    if (statusEl) { statusEl.style.display = ''; statusEl.textContent = 'Backfill queued…'; }
     _pollIntervalId = setInterval(async () => {
       try {
         const s = await fetch('/api/settings/backfill-status').then(r => r.json());
         if (s.error) {
-          statusEl.textContent = `Backfill error: ${s.error}`;
+          if (statusEl) statusEl.textContent = `Backfill error: ${s.error}`;
           clearInterval(_pollIntervalId); _pollIntervalId = null;
-        } else if (s.total > 0) {
-          statusEl.textContent = `Backfill: ${s.done} / ${s.total} snapshots reprocessed`;
+        } else if (s.total > 0 && statusEl) {
+          statusEl.textContent = _backfillText(s);
         }
         if (!s.running) {
           clearInterval(_pollIntervalId); _pollIntervalId = null;
-          if (!s.error) {
+          if (!s.error && statusEl) {
             statusEl.textContent = `Backfill complete — ${s.total} snapshots reprocessed`;
             setTimeout(() => { statusEl.style.display = 'none'; }, 8000);
           }
@@ -191,72 +238,6 @@ const SettingsManager = (() => {
         _toast('Key generation failed: ' + err.message, true);
       } finally {
         btn.disabled = false; btn.textContent = 'Generate Deploy Key';
-      }
-    });
-
-    // Model selection changed — refresh button states
-    document.getElementById('modelSelect').addEventListener('change', async () => {
-      try {
-        const status = await fetch('/api/settings/model-status').then(r => r.json());
-        _updateModelButtons(status);
-      } catch { _updateModelButtons(null); }
-    });
-
-    // Download selected model
-    document.getElementById('btnDownloadModel').addEventListener('click', async () => {
-      const model = document.getElementById('modelSelect').value;
-      const dlBtn = document.getElementById('btnDownloadModel');
-      dlBtn.disabled = true; dlBtn.textContent = '⟳ Starting…';
-      try {
-        await fetch('/api/settings/download-model', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model }),
-        });
-        _toast(`Download started for ${model}`);
-        // Start polling model status
-        if (!_modelStatusPollId) {
-          _modelStatusPollId = setInterval(async () => {
-            try {
-              const s = await fetch('/api/settings/model-status').then(r => r.json());
-              _applyModelStatus(s);
-              if (!Object.values(s).some(x => x.downloading)) {
-                clearInterval(_modelStatusPollId); _modelStatusPollId = null;
-              }
-            } catch { clearInterval(_modelStatusPollId); _modelStatusPollId = null; }
-          }, 2000);
-        }
-      } catch {
-        _toast('Download request failed', true);
-        dlBtn.disabled = false; dlBtn.textContent = '⬇ Download';
-      }
-    });
-
-    // Switch model (only enabled when model is available)
-    document.getElementById('btnSwitchModel').addEventListener('click', async () => {
-      const model = document.getElementById('modelSelect').value;
-      const statusEl = document.getElementById('backfillStatus');
-      if (!confirm(`Switch to ${model}?\n\nThis deletes all annotated images and reprocesses every snapshot in the background.`)) return;
-
-      statusEl.textContent = 'Switching model and starting backfill…';
-      statusEl.style.display = '';
-      if (_pollIntervalId) { clearInterval(_pollIntervalId); _pollIntervalId = null; }
-
-      try {
-        const res = await fetch('/api/settings/switch-model', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model }),
-        });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.detail || 'Unknown error');
-        }
-        _toast(`Switched to ${model} — backfill queued`);
-        _startBackfillPoll(statusEl);
-      } catch (e) {
-        _toast(`Model switch failed: ${e.message}`, true);
-        statusEl.style.display = 'none';
       }
     });
 

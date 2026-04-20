@@ -16,9 +16,9 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # Install playwright (browser download happens in runtime stage)
 RUN pip install --no-cache-dir playwright
 
-# Pre-download model weights into the image so the NAS doesn't need internet at runtime.
+# Pre-download ALL model weights into the image so the NAS doesn't need internet at runtime.
 # Ultralytics saves to WORKDIR (/build/) when the model file doesn't exist there.
-RUN PYTHONPATH=/install/lib/python3.12/site-packages python -c "from ultralytics import YOLO; [YOLO(m) for m in ['yolov8n.pt','yolo11n.pt','yolo11s.pt']]"
+RUN PYTHONPATH=/install/lib/python3.12/site-packages python -c "from ultralytics import YOLO; [YOLO(m) for m in ['yolov8n.pt','yolov8s.pt','yolov8m.pt','yolov8l.pt','yolo11n.pt','yolo11s.pt','yolo11m.pt','yolo11l.pt','rtdetr-l.pt','rtdetr-x.pt']]"
 
 
 FROM python:3.12-slim
@@ -72,11 +72,18 @@ RUN playwright install chromium && chmod -R a+rX /ms-playwright
 WORKDIR /app
 COPY . .
 
-# Bundle weights inside the image (not under /data which is a volume mount)
+# Bundle ALL model weights inside the image (not under /data which is a volume mount)
 RUN mkdir -p /app/weights
-COPY --from=builder /build/yolov8n.pt /app/weights/yolov8n.pt
-COPY --from=builder /build/yolo11n.pt /app/weights/yolo11n.pt
-COPY --from=builder /build/yolo11s.pt /app/weights/yolo11s.pt
+COPY --from=builder /build/yolov8n.pt  /app/weights/yolov8n.pt
+COPY --from=builder /build/yolov8s.pt  /app/weights/yolov8s.pt
+COPY --from=builder /build/yolov8m.pt  /app/weights/yolov8m.pt
+COPY --from=builder /build/yolov8l.pt  /app/weights/yolov8l.pt
+COPY --from=builder /build/yolo11n.pt  /app/weights/yolo11n.pt
+COPY --from=builder /build/yolo11s.pt  /app/weights/yolo11s.pt
+COPY --from=builder /build/yolo11m.pt  /app/weights/yolo11m.pt
+COPY --from=builder /build/yolo11l.pt  /app/weights/yolo11l.pt
+COPY --from=builder /build/rtdetr-l.pt /app/weights/rtdetr-l.pt
+COPY --from=builder /build/rtdetr-x.pt /app/weights/rtdetr-x.pt
 
 RUN chmod +x /app/entrypoint.sh
 
