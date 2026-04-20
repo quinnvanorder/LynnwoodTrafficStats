@@ -1,7 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
-from .. import database, scheduler
+from .. import database, scheduler, settings
 
 router = APIRouter(prefix="/api/cameras", tags=["cameras"])
 
@@ -40,6 +40,11 @@ def update_camera(camera_id: int, body: CameraUpdate):
         database.set_camera_active(camera_id, body.active)
     if body.exclusion_zones is not None:
         database.set_camera_zones(camera_id, body.exclusion_zones)
+        cfg = settings.load()
+        camera_zones = cfg.get("camera_zones", {})
+        camera_zones[str(camera_id)] = body.exclusion_zones
+        cfg["camera_zones"] = camera_zones
+        settings.save(cfg)
     return {"ok": True}
 
 

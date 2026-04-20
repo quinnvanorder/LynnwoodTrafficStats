@@ -40,6 +40,13 @@ async def lifespan(app: FastAPI):
                 database.set_model_active(model_name, True)
         logger.info("Initialized model active states from settings.json")
 
+    # Sync camera zones from settings.json → DB (settings.json is authoritative)
+    for cam_id_str, zones in cfg.get("camera_zones", {}).items():
+        try:
+            database.set_camera_zones(int(cam_id_str), zones)
+        except Exception:
+            pass
+
     # Check for version updates on bundled models and mark available ones in DB
     threading.Thread(target=model_manager.sync_model_configs, daemon=True).start()
 

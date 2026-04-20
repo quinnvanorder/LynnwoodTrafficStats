@@ -25,6 +25,9 @@ DEFAULTS = {
         "rtdetr-l.pt": False,
         "rtdetr-x.pt": False,
     },
+    # Per-camera exclusion zones keyed by camera ID (string).
+    # Authoritative source — synced to DB on startup.
+    "camera_zones": {},
 }
 
 
