@@ -99,7 +99,7 @@ select {
 .btn-full { width: 100%; }
 
 /* ── Settings view ── */
-#view-settings { overflow-y: auto; justify-content: center; }
+#view-settings { overflow-y: auto; justify-content: center; align-items: flex-start; }
 .settings-container {
   width: 100%; max-width: 600px; margin: 0 auto;
   padding: 32px 24px; display: flex; flex-direction: column; gap: 16px;
