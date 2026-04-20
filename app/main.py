@@ -33,8 +33,12 @@ async def lifespan(app: FastAPI):
     configured_model = cfg["detection_model"]
     default_model = database.get_default_model()
     if default_model is None:
+        # Fresh DB — bootstrap active/default state from settings.json
         database.set_default_model(configured_model)
-        logger.info("Initialized default model: %s", configured_model)
+        for model_name, active in cfg.get("model_active", {}).items():
+            if active and model_name != configured_model:
+                database.set_model_active(model_name, True)
+        logger.info("Initialized model active states from settings.json")
 
     # Check for version updates on bundled models and mark available ones in DB
     threading.Thread(target=model_manager.sync_model_configs, daemon=True).start()
