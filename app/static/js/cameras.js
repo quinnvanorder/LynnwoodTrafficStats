@@ -619,29 +619,56 @@ const SidebarCameras = (() => {
       ctx.fillRect(0, 0, _zoneCW, _zoneCH);
     }
 
-    for (let i = 0; i < _zones.length; i++) _drawZone(ctx, _zones[i], i === _selectedIdx);
-
+    // Draw all zone fills onto an offscreen canvas at 100% opacity, then blit
+    // at 50% globalAlpha — overlapping zones share one flat 50% layer, no stacking.
+    const off = document.createElement('canvas');
+    off.width = _zoneCW; off.height = _zoneCH;
+    const offCtx = off.getContext('2d');
+    for (let i = 0; i < _zones.length; i++) _drawZoneFill(offCtx, _zones[i], i === _selectedIdx);
     if (preview) {
-      ctx.fillStyle = 'rgba(239,68,68,0.28)';
+      offCtx.fillStyle = '#ef4444';
+      offCtx.fillRect(preview.x1, preview.y1, preview.x2 - preview.x1, preview.y2 - preview.y1);
+    }
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.drawImage(off, 0, 0);
+    ctx.restore();
+
+    // Outlines and handles drawn at full opacity on top
+    for (let i = 0; i < _zones.length; i++) _drawZoneDecor(ctx, _zones[i], i === _selectedIdx);
+    if (preview) {
       ctx.strokeStyle = '#fca5a5';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([4, 3]);
-      ctx.fillRect(preview.x1, preview.y1, preview.x2 - preview.x1, preview.y2 - preview.y1);
       ctx.strokeRect(preview.x1, preview.y1, preview.x2 - preview.x1, preview.y2 - preview.y1);
       ctx.setLineDash([]);
     }
   }
 
+  function _drawZoneFill(offCtx, z, selected) {
+    const corners = _zCorners(z);
+    offCtx.beginPath();
+    offCtx.moveTo(corners[0].x, corners[0].y);
+    corners.slice(1).forEach(c => offCtx.lineTo(c.x, c.y));
+    offCtx.closePath();
+    offCtx.fillStyle = '#ef4444';
+    offCtx.fill();
+  }
+
   function _drawZone(ctx, z, selected) {
+    _drawZoneFill(ctx, z, selected);
+    _drawZoneDecor(ctx, z, selected);
+  }
+
+  function _drawZoneDecor(ctx, z, selected) {
     const corners = _zCorners(z);
     ctx.beginPath();
     ctx.moveTo(corners[0].x, corners[0].y);
     corners.slice(1).forEach(c => ctx.lineTo(c.x, c.y));
     ctx.closePath();
-    ctx.fillStyle   = selected ? 'rgba(239,68,68,0.45)' : 'rgba(239,68,68,0.32)';
     ctx.strokeStyle = selected ? '#ef4444' : '#f87171';
     ctx.lineWidth   = selected ? 2 : 1.5;
-    ctx.fill(); ctx.stroke();
+    ctx.stroke();
 
     if (!selected) return;
 

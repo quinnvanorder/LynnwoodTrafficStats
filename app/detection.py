@@ -93,7 +93,7 @@ def draw_zone_overlay(image: Image.Image, zones: list) -> Image.Image:
     draw = ImageDraw.Draw(overlay)
     w, h = image.size
     for zone in zones:
-        draw.polygon(_zone_polygon(zone, w, h), fill=(120, 120, 120, 140))
+        draw.polygon(_zone_polygon(zone, w, h), fill=(120, 120, 120, 128))
     base = image.convert('RGBA')
     return PILImage.alpha_composite(base, overlay).convert('RGB')
 
