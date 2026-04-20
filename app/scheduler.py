@@ -125,6 +125,7 @@ def snapshot_job() -> None:
         logger.info("No active cameras — skipping snapshot")
         return
 
+    camera_zones_cfg = cfg.get("camera_zones", {})
     results = []
     for cam in cameras:
         img = _fetch_image(cam["url"])
@@ -137,7 +138,7 @@ def snapshot_job() -> None:
         # Insert snapshot row first (counts start at zero)
         snap_id = database.insert_snapshot(cam["id"], image_path, {}, captured_at)
 
-        zones = database.get_camera_zones(cam["id"])
+        zones = camera_zones_cfg.get(str(cam["id"]), [])
         default_counts: dict = {}
         default_ann_path: str | None = None
 
@@ -203,6 +204,7 @@ def backfill_job(model_name: str, generation: int = 0) -> None:
     }
     logger.info("Backfill started: %d snapshots model=%s", len(snapshots), model_name)
 
+    camera_zones_cfg = cfg.get("camera_zones", {})
     cam_zones: dict = {}
     for snap in snapshots:
         if _backfill_generation != generation:
@@ -212,7 +214,7 @@ def backfill_job(model_name: str, generation: int = 0) -> None:
 
         cam_id = snap["camera_id"]
         if cam_id not in cam_zones:
-            cam_zones[cam_id] = database.get_camera_zones(cam_id)
+            cam_zones[cam_id] = camera_zones_cfg.get(str(cam_id), [])
 
         full_path = DATA_DIR / snap["image_path"]
         if not full_path.exists():
