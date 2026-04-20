@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -6,6 +7,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .. import database, exporter, model_manager, scheduler, settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -61,9 +64,17 @@ def download_model(body: dict):
 @router.get("/model-configs")
 def get_model_configs():
     """Returns model_configs rows merged with live download status and avg processing time."""
-    configs = {c["model_name"]: c for c in database.get_model_configs()}
+    try:
+        configs = {c["model_name"]: c for c in database.get_model_configs()}
+    except Exception as e:
+        logger.error("get_model_configs: DB error loading model_configs: %s", e)
+        configs = {}
+    try:
+        avg_ms = database.get_avg_processing_ms()
+    except Exception as e:
+        logger.error("get_model_configs: DB error loading avg processing times: %s", e)
+        avg_ms = {}
     status = model_manager.get_model_status()
-    avg_ms = database.get_avg_processing_ms()
     result = []
     for name in model_manager.ALL_MODELS:
         cfg = configs.get(name, {})

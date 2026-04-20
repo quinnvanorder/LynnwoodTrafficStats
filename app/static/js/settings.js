@@ -42,22 +42,37 @@ const SettingsManager = (() => {
   // ── Model table ─────────────────────────────────────────────────────────────
 
   async function _refreshModelTable() {
+    const wrap = document.getElementById('modelTableWrap');
     try {
-      const configs = await fetch('/api/settings/model-configs').then(r => r.json());
+      const r = await fetch('/api/settings/model-configs');
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(`HTTP ${r.status}: ${text.slice(0, 200)}`);
+      }
+      const configs = await r.json();
+      if (!Array.isArray(configs)) {
+        throw new Error('Unexpected response from /api/settings/model-configs: ' + JSON.stringify(configs).slice(0, 200));
+      }
       _renderModelTable(configs);
       const anyDownloading = configs.some(c => c.downloading);
       if (anyDownloading && !_modelPollId) {
         _modelPollId = setInterval(async () => {
           try {
-            const c2 = await fetch('/api/settings/model-configs').then(r => r.json());
-            _renderModelTable(c2);
-            if (!c2.some(c => c.downloading)) {
+            const r2 = await fetch('/api/settings/model-configs');
+            const c2 = await r2.json();
+            if (Array.isArray(c2)) _renderModelTable(c2);
+            if (!Array.isArray(c2) || !c2.some(c => c.downloading)) {
               clearInterval(_modelPollId); _modelPollId = null;
             }
           } catch { clearInterval(_modelPollId); _modelPollId = null; }
         }, 2000);
       }
-    } catch { /* server may be starting */ }
+    } catch (err) {
+      console.error('Failed to load model configs:', err);
+      if (wrap) {
+        wrap.innerHTML = `<p class="hint" style="color:#f87171">Could not load model list: ${err.message}.<br>Check the browser console (F12) and server logs for details.</p>`;
+      }
+    }
   }
 
   function _renderModelTable(configs) {
