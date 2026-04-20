@@ -3,6 +3,7 @@ import io
 import logging
 import os
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -142,15 +143,17 @@ def snapshot_job() -> None:
 
         for model_name in active_models:
             try:
+                t0 = time.monotonic()
                 counts, annotated_img = detection.detect(
                     img, model_name=model_name, confidence=confidence,
                     imgsz=imgsz, exclusion_zones=zones,
                 )
+                elapsed_ms = round((time.monotonic() - t0) * 1000)
                 ann_path = _save_image(
                     cam["id"], annotated_img, captured_at,
                     subdir=f"annotated/{_model_slug(model_name)}",
                 )
-                database.insert_model_count(snap_id, model_name, counts, ann_path)
+                database.insert_model_count(snap_id, model_name, counts, ann_path, elapsed_ms)
                 if model_name == default_model:
                     default_counts = counts
                     default_ann_path = ann_path
@@ -215,15 +218,17 @@ def backfill_job(model_name: str, generation: int = 0) -> None:
             continue
         try:
             img = Image.open(full_path).convert("RGB")
+            t0 = time.monotonic()
             counts, annotated_img = detection.detect(
                 img, model_name=model_name, confidence=confidence,
                 imgsz=imgsz, exclusion_zones=cam_zones[cam_id],
             )
+            elapsed_ms = round((time.monotonic() - t0) * 1000)
             ann_path = _save_image(
                 cam_id, annotated_img, snap["captured_at"],
                 subdir=f"annotated/{_model_slug(model_name)}",
             )
-            database.insert_model_count(snap["id"], model_name, counts, ann_path)
+            database.insert_model_count(snap["id"], model_name, counts, ann_path, elapsed_ms)
 
             # If this is the default model, also keep snapshot columns current
             if model_name == database.get_default_model():

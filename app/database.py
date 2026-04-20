@@ -86,6 +86,7 @@ def init_db() -> None:
                 bus_count         INTEGER NOT NULL DEFAULT 0,
                 truck_count       INTEGER NOT NULL DEFAULT 0,
                 total_count       INTEGER NOT NULL DEFAULT 0,
+                processing_ms     INTEGER,
                 processed_at      TEXT    NOT NULL DEFAULT (datetime('now')),
                 UNIQUE(snapshot_id, model_name)
             );
@@ -98,6 +99,7 @@ def init_db() -> None:
         for stmt in [
             "ALTER TABLE snapshots ADD COLUMN annotated_path TEXT",
             "ALTER TABLE cameras ADD COLUMN exclusion_zones TEXT",
+            "ALTER TABLE model_counts ADD COLUMN processing_ms INTEGER",
         ]:
             try:
                 db.execute(stmt)
@@ -172,6 +174,7 @@ def insert_model_count(
     model_name: str,
     counts: dict,
     annotated_path: str | None = None,
+    processing_ms: int | None = None,
 ) -> None:
     total = sum(counts.get(k, 0) for k in
                 ("person_count", "bicycle_count", "motorcycle_count",
@@ -181,15 +184,27 @@ def insert_model_count(
             INSERT OR IGNORE INTO model_counts
                 (snapshot_id, model_name, annotated_path,
                  person_count, bicycle_count, motorcycle_count,
-                 car_count, bus_count, truck_count, total_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 car_count, bus_count, truck_count, total_count, processing_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             snapshot_id, model_name, annotated_path,
             counts.get("person_count", 0), counts.get("bicycle_count", 0),
             counts.get("motorcycle_count", 0), counts.get("car_count", 0),
             counts.get("bus_count", 0), counts.get("truck_count", 0),
-            total,
+            total, processing_ms,
         ))
+
+
+def get_avg_processing_ms() -> dict[str, float | None]:
+    """Return average processing_ms per model for all models that have counts."""
+    with get_db() as db:
+        rows = db.execute("""
+            SELECT model_name, AVG(processing_ms) AS avg_ms, COUNT(*) AS n
+            FROM model_counts
+            WHERE processing_ms IS NOT NULL
+            GROUP BY model_name
+        """).fetchall()
+        return {r["model_name"]: round(r["avg_ms"]) for r in rows}
 
 
 def get_snapshots_without_model(model_name: str) -> list[dict]:

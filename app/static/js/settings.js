@@ -71,6 +71,11 @@ const SettingsManager = (() => {
                         : c.available   ? '✓ ready'
                         : c.error       ? '✗ ' + c.error
                         : '— not downloaded';
+      const avgText = c.avg_processing_ms != null
+        ? c.avg_processing_ms >= 1000
+          ? (c.avg_processing_ms / 1000).toFixed(1) + ' s'
+          : c.avg_processing_ms + ' ms'
+        : '—';
       const isDefault = c.is_default;
       const isActive  = c.is_active;
 
@@ -95,6 +100,7 @@ const SettingsManager = (() => {
           <td class="model-name-cell">${meta.label}</td>
           <td><span class="model-type-badge">${meta.type}</span></td>
           <td class="model-status-cell ${statusClass}">${statusText}</td>
+          <td class="model-status-cell">${avgText}</td>
         </tr>
       `;
     }).join('');

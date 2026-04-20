@@ -60,9 +60,10 @@ def download_model(body: dict):
 
 @router.get("/model-configs")
 def get_model_configs():
-    """Returns model_configs rows merged with live download status."""
+    """Returns model_configs rows merged with live download status and avg processing time."""
     configs = {c["model_name"]: c for c in database.get_model_configs()}
     status = model_manager.get_model_status()
+    avg_ms = database.get_avg_processing_ms()
     result = []
     for name in model_manager.ALL_MODELS:
         cfg = configs.get(name, {})
@@ -76,6 +77,7 @@ def get_model_configs():
             "available": s.get("available", False),
             "downloading": s.get("downloading", False),
             "error": s.get("error"),
+            "avg_processing_ms": avg_ms.get(name),
         })
     return result
 
